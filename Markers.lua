@@ -136,6 +136,13 @@ local function FocusedQuest()
   if Num(s) and s > 0 then return s end
 end
 
+-- Does the client tell us whether the player is inside a quest's area (the blue blob on the map)?
+-- C_Minimap.IsInsideQuestBlob is how retail reports it; if this client lacks it, the glow just never shows.
+local function AreaApi()
+  return C_Minimap and type(C_Minimap.IsInsideQuestBlob) == "function"
+end
+ns.QuestAreaSupported = AreaApi
+
 -- Target collection (runs on events and every REFRESH seconds) ----------------------------------
 
 -- The player's map, plus up to two parent zone maps, so quests shown on the zone map are found
@@ -377,6 +384,12 @@ local function Tick()
           t.drawn, t.drawnD, changed = t.bearing, d5, true
         end
         t.seen = tickNo
+        -- Quest-area glow: only the focused quest's marker, and only where the client can tell us.
+        local inside
+        if t.primary and t.questID and db.mk_areaGlow ~= false and AreaApi() then
+          inside = Try(C_Minimap.IsInsideQuestBlob, t.questID) and true or false
+        end
+        if inside ~= t.inArea then t.inArea = inside; changed = true end
       end
     end
   end
@@ -464,7 +477,18 @@ local function GetIcon(i)
     end)
     ic:SetScript("OnDragStart", function() dragged = true; ns.root:GetScript("OnDragStart")(ns.root) end)
     ic:SetScript("OnDragStop", function() ns.root:GetScript("OnDragStop")(ns.root) end)
-    -- Drawn bottom to top: drop shadow, then the icon itself.
+    -- Drawn bottom to top: quest-area glow, drop shadow, then the icon itself.
+    ic.glow = ic:CreateTexture(nil, "BACKGROUND", nil, -1)
+    ic.glow:SetTexture("Interface\\Cooldown\\star4"); ic.glow:SetBlendMode("ADD")
+    ic.glow:SetPoint("CENTER"); ic.glow:SetAlpha(0.7); ic.glow:Hide()
+    -- A slow pulse run by the game's animation system (no per-frame addon code). Without it the glow is static.
+    local ok, ag = pcall(function()
+      local g = ic.glow:CreateAnimationGroup(); g:SetLooping("BOUNCE")
+      local a = g:CreateAnimation("Alpha")
+      a:SetFromAlpha(0.25); a:SetToAlpha(0.9); a:SetDuration(0.8); a:SetSmoothing("IN_OUT")
+      return g
+    end)
+    ic.glowAnim = ok and ag or nil
     ic.shadow = ic:CreateTexture(nil, "BACKGROUND", nil, 0)
     ic.tex = ic:CreateTexture(nil, "ARTWORK"); ic.tex:SetAllPoints()
     ic.dist = ic:CreateFontString(nil, "OVERLAY")
@@ -506,6 +530,7 @@ local function Restyle(ic, t)
     ic.tex:SetDesaturated(true); ic.tex:SetVertexColor(c[1], c[2], c[3], 1); ic.tex:SetAlpha(c[4])
   end
   local base = native and 1 or c[4]
+  if native then ic.glow:SetVertexColor(1, 0.82, 0, 1) else ic.glow:SetVertexColor(c[1], c[2], c[3], 1) end
 
   local sa = db.mk_shadowAlpha or 0
   if sa > 0 then
@@ -580,6 +605,14 @@ function ns.LayoutMarkers(b, ppd, half, fade, fadeZone)
         ic.dist:ClearAllPoints()
         if flip then ic.dist:SetPoint("BOTTOM", ic, "TOP", 0, -1) else ic.dist:SetPoint("TOP", ic, "BOTTOM", 0, 1) end
       end
+      if t.inArea then
+        ic.glow:SetSize(min(size * 2, db.height), min(size * 2, db.height))   -- never spills outside the bar
+        ic.glow:Show()
+        if ic.glowAnim and not ic.glowAnim:IsPlaying() then ic.glowAnim:Play() end
+      else
+        ic.glow:Hide()
+        if ic.glowAnim then ic.glowAnim:Stop() end
+      end
       ic:ClearAllPoints()
       ic:SetPoint("CENTER", ns.strip, "CENTER", x, y)
       ic:SetAlpha(alpha)
@@ -587,7 +620,7 @@ function ns.LayoutMarkers(b, ppd, half, fade, fadeZone)
       ic.dist:SetShown(showDist)
     end
   end
-  for i = shown + 1, #icons do icons[i]:Hide(); icons[i].t = nil end
+  for i = shown + 1, #icons do icons[i]:Hide(); icons[i].t = nil end   -- hiding the icon hides its glow too
 end
 
 ns.LayoutMarkers = ns.Perf("LayoutMarkers", ns.LayoutMarkers)
@@ -712,4 +745,5 @@ function ns.MarkerDebug()
     else qstate = "in use" end
   end
   print("  questie:", qstate)
+  print("  quest area glow:", AreaApi() and "supported" or "not supported by this client")
 end

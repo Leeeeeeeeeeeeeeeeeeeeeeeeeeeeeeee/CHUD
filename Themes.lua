@@ -289,96 +289,6 @@ function ns.DeleteTheme(name)
   if ns.OnSettingsChanged then ns.OnSettingsChanged() end
 end
 
--- /chud daydemo: sweeps the Daylight colors through a whole day in DEMO_SECONDS, with a clock under the bar, for
--- recording a GIF. It loops until you run the command again, which puts your own colors (or the live Daylight colors) back.
--- One caption shared by both demos, sitting under the bar. It has its own frame in a high strata so nothing the bar
--- draws can cover it, and an outlined font so it reads over any background.
-local captionFS
-local function Caption(text)
-  if not captionFS then
-    local f = CreateFrame("Frame", nil, UIParent)
-    f:SetFrameStrata("FULLSCREEN_DIALOG")
-    f:SetAllPoints(UIParent)
-    captionFS = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    captionFS:SetFont(STANDARD_TEXT_FONT, 22, "OUTLINE")
-    captionFS:SetPoint("TOP", ns.root, "BOTTOM", 0, -14)
-    captionFS:SetTextColor(1, 1, 1)
-    captionFS.frame = f
-  end
-  captionFS:SetText(text or "")
-  captionFS.frame:SetShown(text ~= nil)
-end
-
-local DEMO_SECONDS = 16
-local demo = CreateFrame("Frame")
-demo:Hide()
-local demoSaved, demoT
-demo:SetScript("OnUpdate", function(self, elapsed)
-  demoT = demoT + elapsed
-  if demoT >= DEMO_SECONDS then demoT = demoT - DEMO_SECONDS end   -- loops until stopped
-  local hour = demoT / DEMO_SECONDS * 24
-  for k, v in pairs(DaylightPalette(hour * 2)) do
-    if k ~= "mk_color" then ns.db[k] = v end
-  end
-  ns.Apply()
-  Caption(format("%02d:%02d", floor(hour), floor((hour % 1) * 60 / 30) * 30))   -- half-hour steps, like the real thing
-end)
-function ns.StopDaylightDemo()
-  if not demoSaved then return end
-  demo:Hide()
-  for k, v in pairs(demoSaved) do ns.db[k] = v end
-  demoSaved = nil
-  Caption(nil)
-  if ns.db.daylight then ApplyDaylightColors() end   -- if Daylight is on, go straight back to the current time's colors
-  ns.Apply()
-  if ns.RefreshSettings then ns.RefreshSettings() end
-end
-function ns.DaylightDemo()
-  if demoSaved then ns.StopDaylightDemo(); return end
-  if ns.StopThemeDemo then ns.StopThemeDemo() end
-  demoSaved = {}
-  for _, k in ipairs(ns.COLOR_KEYS) do demoSaved[k] = ns.Copy(ns.db[k]) end
-  demoT = 0
-  Caption("00:00")
-  demo:Show()
-end
-
--- /chud themedemo: shows every built-in theme in turn, THEME_SECONDS each, with its name under the bar, for recording a
--- GIF. It loops until you run the command again, which puts everything back (including Daylight if it was on).
-local THEME_SECONDS = 1.6
-local tdemo = CreateFrame("Frame")
-tdemo:Hide()
-local tdSaved, tdT, tdIndex
-tdemo:SetScript("OnUpdate", function(_, elapsed)
-  tdT = tdT + elapsed
-  if tdT < THEME_SECONDS then return end
-  tdT = 0
-  tdIndex = tdIndex + 1
-  if tdIndex > #ns.BuiltinNames then tdIndex = 1 end   -- loops until stopped
-  local name = ns.BuiltinNames[tdIndex]
-  Caption(name)   -- first, so the name shows even if applying the theme hits a problem
-  local ok, err = pcall(ns.ApplyTheme, name)
-  if not ok then print("|cffd9bf4dCHUD:|r theme demo could not apply " .. name .. ": " .. tostring(err)) end
-end)
-function ns.StopThemeDemo()
-  if not tdSaved then return end
-  tdemo:Hide()
-  Caption(nil)
-  for k, v in pairs(tdSaved.snap) do ns.db[k] = v end
-  ns.db.daylight, ns.db.preDaylight, ns.db.dayBucket = tdSaved.daylight, tdSaved.pre, tdSaved.bucket
-  tdSaved = nil
-  ns.Apply()
-  if ns.RefreshSettings then ns.RefreshSettings() end
-end
-function ns.ThemeDemo()
-  if tdSaved then ns.StopThemeDemo(); return end
-  if demoSaved then ns.StopDaylightDemo() end
-  tdSaved = { snap = ns.SnapshotTheme(), daylight = ns.db.daylight, pre = ns.db.preDaylight, bucket = ns.db.dayBucket }
-  tdIndex, tdT = 0, THEME_SECONDS   -- the first theme shows on the next frame
-  Caption("")
-  tdemo:Show()
-end
-
 -- Keeps Daylight in step with the game clock: when the half-hour has changed, the new colors are applied. The first check
 -- runs right away (so login catches up), then one every 30 real seconds.
 local dayAcc = 30
@@ -389,7 +299,7 @@ dayFrame:SetScript("OnUpdate", function(_, elapsed)
   local db = ns.db
   if not db then return end
   dayAcc = 0
-  if db.daylight and not demoSaved and not tdSaved and db.dayBucket ~= DayBucket() then
+  if db.daylight and db.dayBucket ~= DayBucket() then
     ApplyDaylightColors()
     ns.Apply()
     if ns.RefreshSettings then ns.RefreshSettings() end

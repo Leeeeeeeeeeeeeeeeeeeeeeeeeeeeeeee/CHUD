@@ -1163,8 +1163,6 @@ SlashCmdList.CHUD = function(msg)
   elseif msg == "markers" then if ns.MarkerDebug then ns.MarkerDebug() end
   elseif msg == "menu" then if ns.ToggleMarkerMenu then ns.ToggleMarkerMenu() end
   elseif msg == "xpdemo" then ns.XPDemo()
-  elseif msg == "daydemo" then ns.DaylightDemo()
-  elseif msg == "themedemo" then ns.ThemeDemo()
   elseif msg == "perf" then ns.PerfToggle()
   elseif msg == "center" then ns.CenterHorizontal()
   elseif msg == "resetpos" then ns.ResetPosition()

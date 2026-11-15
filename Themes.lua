@@ -290,7 +290,7 @@ function ns.DeleteTheme(name)
 end
 
 -- /chud daydemo: sweeps the Daylight colors through a whole day in DEMO_SECONDS, with a clock under the bar, for
--- recording a GIF. Your own colors (or the live Daylight colors) are put back at the end. Running it again stops it.
+-- recording a GIF. It loops until you run the command again, which puts your own colors (or the live Daylight colors) back.
 local DEMO_SECONDS = 16
 local demo = CreateFrame("Frame")
 demo:Hide()
@@ -298,8 +298,8 @@ local demoClock
 local demoSaved, demoT
 demo:SetScript("OnUpdate", function(self, elapsed)
   demoT = demoT + elapsed
+  if demoT >= DEMO_SECONDS then demoT = demoT - DEMO_SECONDS end   -- loops until stopped
   local hour = demoT / DEMO_SECONDS * 24
-  if hour >= 24 then ns.StopDaylightDemo(); return end
   for k, v in pairs(DaylightPalette(hour * 2)) do
     if k ~= "mk_color" then ns.db[k] = v end
   end
@@ -318,6 +318,7 @@ function ns.StopDaylightDemo()
 end
 function ns.DaylightDemo()
   if demoSaved then ns.StopDaylightDemo(); return end
+  if ns.StopThemeDemo then ns.StopThemeDemo() end
   if not demoClock then
     demoClock = UIParent:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     demoClock:SetPoint("TOP", ns.root, "BOTTOM", 0, -10)
@@ -327,6 +328,45 @@ function ns.DaylightDemo()
   demoT = 0
   demoClock:SetText("00:00"); demoClock:Show()
   demo:Show()
+end
+
+-- /chud themedemo: shows every built-in theme in turn, THEME_SECONDS each, with its name under the bar, for recording a
+-- GIF. It loops until you run the command again, which puts everything back (including Daylight if it was on).
+local THEME_SECONDS = 2
+local tdemo = CreateFrame("Frame")
+tdemo:Hide()
+local tdLabel, tdSaved, tdT, tdIndex
+tdemo:SetScript("OnUpdate", function(_, elapsed)
+  tdT = tdT + elapsed
+  if tdT < THEME_SECONDS then return end
+  tdT = 0
+  tdIndex = tdIndex + 1
+  if tdIndex > #ns.BuiltinNames then tdIndex = 1 end   -- loops until stopped
+  local name = ns.BuiltinNames[tdIndex]
+  ns.ApplyTheme(name)
+  tdLabel:SetText(name)
+end)
+function ns.StopThemeDemo()
+  if not tdSaved then return end
+  tdemo:Hide()
+  tdLabel:Hide()
+  for k, v in pairs(tdSaved.snap) do ns.db[k] = v end
+  ns.db.daylight, ns.db.preDaylight, ns.db.dayBucket = tdSaved.daylight, tdSaved.pre, tdSaved.bucket
+  tdSaved = nil
+  ns.Apply()
+  if ns.RefreshSettings then ns.RefreshSettings() end
+end
+function ns.ThemeDemo()
+  if tdSaved then ns.StopThemeDemo(); return end
+  if demoSaved then ns.StopDaylightDemo() end
+  if not tdLabel then
+    tdLabel = UIParent:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    tdLabel:SetPoint("TOP", ns.root, "BOTTOM", 0, -10)
+  end
+  tdSaved = { snap = ns.SnapshotTheme(), daylight = ns.db.daylight, pre = ns.db.preDaylight, bucket = ns.db.dayBucket }
+  tdIndex, tdT = 0, THEME_SECONDS   -- the first theme shows on the next frame
+  tdLabel:Show()
+  tdemo:Show()
 end
 
 -- Keeps Daylight in step with the game clock: when the half-hour has changed, the new colors are applied. The first check
@@ -339,7 +379,7 @@ dayFrame:SetScript("OnUpdate", function(_, elapsed)
   local db = ns.db
   if not db then return end
   dayAcc = 0
-  if db.daylight and not demoSaved and db.dayBucket ~= DayBucket() then
+  if db.daylight and not demoSaved and not tdSaved and db.dayBucket ~= DayBucket() then
     ApplyDaylightColors()
     ns.Apply()
     if ns.RefreshSettings then ns.RefreshSettings() end

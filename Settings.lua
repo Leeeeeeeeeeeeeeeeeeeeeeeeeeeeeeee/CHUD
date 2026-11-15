@@ -451,23 +451,44 @@ local function BuildMarkerMenu()
   f:SetScript("OnHide", function() c:Hide() end)
 
   -- Hover explanation for an option: what data it uses and when it shows up.
-  local function Tip(w, title, text)
+  -- `extra` (optional) is called when the tooltip opens and may return one more paragraph, shown in orange.
+  local function Tip(w, title, text, extra)
     w:SetScript("OnEnter", function(self)
       GameTooltip:SetOwner(f, "ANCHOR_NONE")
       GameTooltip:SetPoint("TOPLEFT", f, "TOPRIGHT", 6, 0)
       GameTooltip:AddLine(title, 1, 0.82, 0)
       GameTooltip:AddLine(text, 1, 1, 1, true)
+      local more = extra and extra()
+      if more then GameTooltip:AddLine(" "); GameTooltip:AddLine(more, 1, 0.55, 0.3, true) end
       GameTooltip:Show()
     end)
     w:SetScript("OnLeave", function() GameTooltip:Hide() end)
   end
   local function opt(key) return function() return ns.db[key] end, function(v) ns.db[key] = v; ns.MarkersChanged() end end
-  local function C(text, key, y, tip)
+  local function C(text, key, y, tip, extra)
     local g2, s2 = opt(key)
     local b = Check(f, text, 14, y, g2, s2)
     b:SetHitRectInsets(0, -190, 0, 0)   -- hovering the label counts too
-    Tip(b, text, tip)
+    Tip(b, text, tip, extra)
     return b
+  end
+
+  -- Questie's own settings can hide a kind of icon before CHUD ever sees it. CHUD only reads Questie and never
+  -- changes its settings, so the matching option greys out and its tooltip says which Questie option to turn on.
+  local function QuestieHides(kind)
+    local Qe = _G.Questie
+    if not (Qe and ns.db.mk_questie ~= false and type(Qe.db) == "table" and type(Qe.db.profile) == "table") then return end
+    local p = Qe.db.profile
+    local where = "In Questie's options (/questie), Icons tab, tick "
+    if p.enabled == false then return "Questie's icons are turned off. " .. where .. "Enable Icons." end
+    if p.enableMapIcons == false and p.enableMiniMapIcons == false then
+      return "Questie's map and minimap icons are both turned off. " .. where .. "Enable Map Icons or Enable Minimap Icons."
+    end
+    if kind == "giver" and (p.enableAvailable == false or p.showAvailableQuests == false) then
+      return "Questie is hiding available quests, so CHUD never receives them. " .. where .. "Available Normal Quests."
+    end
+    if kind == "objective" and p.enableObjectives == false then return "Questie is hiding quest objectives. " .. where .. "Objectives." end
+    if kind == "turnin" and p.enableTurnins == false then return "Questie is hiding turn-ins. " .. where .. "Completed Quests." end
   end
   local function Section(text, y) Header(f, text, 14, y, 224) end
 
@@ -478,10 +499,10 @@ local function BuildMarkerMenu()
   Section("Quests", -50)
   C("Tracked Quest / Waypoint", "mk_tracked", -86,
     "Points to the quest you are tracking (click a quest in the tracker or quest log to track it) or the map waypoint you are tracking. It shows whenever the game provides a position for it, and sticks to the edge of the bar when it is off to the side, so you know which way to turn. Not available in dungeons.")
-  C("Quest Objectives & Turn-Ins", "mk_objectives", -109,
-    "Quests in your log that have a marker on this zone's map: objective areas, and turn-in spots for quests you have completed. The positions come from the same data as the world map's quest markers, so a quest with no map marker will not show. Updates when your quest log changes. Limited by Max Distance.")
-  C("Quest Givers", "mk_givers", -132,
-    "Quests you could pick up in this zone (the same ones the world map marks). Only quest givers the map shows will appear. Limited by Max Distance.")
+  local objB = C("Quest Objectives & Turn-Ins", "mk_objectives", -109,
+    "Quests in your log that have a marker on this zone's map: objective areas, and turn-in spots for quests you have completed. The positions come from the same data as the world map's quest markers, so a quest with no map marker will not show. Updates when your quest log changes. Limited by Max Distance.", function() return QuestieHides("objective") or QuestieHides("turnin") end)
+  local giverB = C("Quest Givers", "mk_givers", -132,
+    "Quests you could pick up in this zone (the same ones the world map marks). Only quest givers the map shows will appear. Limited by Max Distance.", function() return QuestieHides("giver") end)
   Section("World", -164)
   C("Rare Elites", "mk_rares", -200,
     "Rare elites the game is currently reporting, the same ones that appear as map and minimap markers when you are in range. They show only while the game reports them and disappear once killed. Limited by Max Distance.")
@@ -515,6 +536,9 @@ local function BuildMarkerMenu()
     local installed = _G.Questie ~= nil
     local active = installed and ns.db.mk_questie ~= false
     useQ.Dim(not installed); focusOnly.Dim(not active); qr.Dim(not active)
+    -- Greyed out when Questie's own settings hide everything this option would show.
+    objB.Dim(QuestieHides("objective") ~= nil and QuestieHides("turnin") ~= nil)
+    giverB.Dim(QuestieHides("giver") ~= nil)
   end
   Button(f, "Open Settings", 14, -556, 224, function()
     f:Hide()

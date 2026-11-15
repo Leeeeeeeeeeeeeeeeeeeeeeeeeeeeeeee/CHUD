@@ -425,7 +425,7 @@ end
 local markerMenu
 local function BuildMarkerMenu()
   local f = CreateFrame("Frame", "CHUDMarkerMenu", UIParent)
-  f:SetSize(500, 496); f:SetFrameStrata("FULLSCREEN_DIALOG"); f:SetToplevel(true)
+  f:SetSize(500, 596); f:SetFrameStrata("FULLSCREEN_DIALOG"); f:SetToplevel(true)
   f:EnableMouse(true); f:SetClampedToScreen(true); f:Hide()
   local b = f:CreateTexture(nil, "BACKGROUND", nil, -1)
   b:SetPoint("TOPLEFT", -1, 1); b:SetPoint("BOTTOMRIGHT", 1, -1); b:SetColorTexture(unpack(BORDER))
@@ -484,7 +484,21 @@ local function BuildMarkerMenu()
     "Spots where you have opened something with the Opening cast (chests and similar objects). CHUD saves your position when the cast succeeds, so this only knows places you have been. Limited by Max Distance.")
   local note = Label(f, "Spots are saved as you gather them.", 14, -366, "GameFontHighlightSmall")
   note:SetTextColor(0.65, 0.65, 0.65)
-  Button(f, "Open Settings", 14, -440, 224, function()
+  Section("Questie", -392)
+  local qs = Label(f, "", 14, -418, "GameFontHighlightSmall")
+  refreshers[#refreshers + 1] = function()
+    if _G.Questie then qs:SetText("Questie detected"); qs:SetTextColor(0.4, 0.9, 0.4)
+    else qs:SetText("Questie not detected"); qs:SetTextColor(0.65, 0.65, 0.65) end
+  end
+  C("Use Questie Markers", "mk_questie", -436,
+    "When Questie is installed, quest objectives, turn-ins and quest givers come from Questie's map icons instead of the game's. Turned on automatically once Questie is detected. Untick it to go back to the game's own quest markers. Quest Objectives and Quest Givers above still decide which kinds show.")
+  C("Focused Quest Only", "mk_qFocusOnly", -459,
+    "Shows Questie icons only for the quest you have focused (click a quest icon on the bar, or focus it in Questie's tracker or the quest log). Every other quest icon is hidden.")
+  local qr = Slider(f, "Questie Max Distance", 14, -492, 130, 20, 500, 10,
+    function() return ns.db.mk_qRange end, function(v) ns.db.mk_qRange = v; ns.MarkersChanged() end,
+    function(v) return format("%d yd", v) end, true)
+  Tip(qr, "Questie Max Distance", "Questie icons farther away than this are hidden. Questie draws one icon per spawn, so only the nearest icon of each quest is shown. The focused quest's marker ignores this and always shows.")
+  Button(f, "Open Settings", 14, -556, 224, function()
     f:Hide()
     if ns.categoryID then Settings.OpenToCategory(ns.categoryID) end
   end)
@@ -514,7 +528,7 @@ local function BuildMarkerMenu()
   local rg = Slider(f, "Max Distance", X, -174, 130, 100, 1500, 50,
     function() return ns.db.mk_range end, function(v) ns.db.mk_range = v; ns.MarkersChanged() end,
     function(v) return format("%d yd", v) end, true)
-  Tip(rg, "Max Distance", "Markers farther away than this are hidden. The tracked quest or waypoint marker ignores this and always shows.")
+  Tip(rg, "Max Distance", "Markers farther away than this are hidden. The tracked quest or waypoint marker ignores this and always shows. Questie icons use their own Questie Max Distance.")
 
   Header(f, "Icon Style", X, -232, 224)
   local sz = Slider(f, "Icon Size", X, -268, 130, 10, 28, 1,
@@ -530,6 +544,12 @@ local function BuildMarkerMenu()
   local sd = Slider(f, "Shadow Distance", X, -434, 130, 0, 4, 0.5,
     function() return ns.db.mk_shadowDist end, function(v) ns.db.mk_shadowDist = v; ns.MarkersStyle() end, Px, true)
   Tip(sd, "Shadow Distance", "How far the shadow is offset down and to the right of the icon, in pixels.")
+  StyleCheck("Smaller When Far", "mk_depth", -490,
+    "Icons shrink the farther away they are, down to about 60% of Icon Size at the edge of their range. The focused quest's icon is always the largest, and no icon makes the bar taller.")
+  if ns.QuestAreaSupported and ns.QuestAreaSupported() then
+    StyleCheck("Glow In Quest Area", "mk_areaGlow", -513,
+      "The focused quest's icon pulses with a soft glow while you are inside that quest's area (the blue zone on the map).")
+  end
   return f
 end
 

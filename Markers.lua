@@ -25,6 +25,8 @@ local atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
 
 local MAX_ICONS = 24
 local FOCUS_SCALE = 1.3   -- the focused (primary) icon is this much larger than a normal one, but never taller than the bar
+local GIVER_SHRINK = 0.30  -- a quest giver at its fade distance is this much smaller than normal ...
+local GIVER_FADE = 0.50    -- ... and this much more transparent (both ease in with distance)
 local FAR_SCALE = 0.6     -- an icon at its maximum range is this fraction of normal size (when Smaller When Far is on)
 local TICK = 0.25       -- seconds between bearing updates
 local REFRESH = 2.0     -- seconds between full re-queries (events also trigger one)
@@ -562,27 +564,47 @@ local function Restyle(ic, t)
   ic.dist:SetAlpha(tc[4])
 end
 
+-- Which way "outside the bar" is: below it when the bar is in the upper half of the screen (the usual
+-- place), above it when it is in the lower half, so the icons are never pushed off the screen.
+local function OutsideDir()
+  local _, cy = ns.root:GetCenter()
+  if type(cy) == "number" and UIParent and cy < UIParent:GetHeight() / 2 then return 1 end
+  return -1
+end
+
 function ns.LayoutMarkers(b, ppd, half, fade, fadeZone)
   local db = ns.db
   local base = db.mk_size or 16
   local maxSize = max(base, db.height - 2)   -- the focused icon never makes the bar taller
   local depth = db.mk_depth ~= false
+  local outside = db.mk_outside
+  local dir = outside and OutsideDir() or 0   -- +1 above the bar, -1 below it
+  local giverRange = max(db.mk_giverRange or 80, 1)
   local shown = 0
   for i = 1, #active do
     local t = active[i]
     local ic = GetIcon(shown + 1)
-    local size = base
+    local size, dim = base, 1
     if t.primary then
       size = min(base * FOCUS_SCALE, maxSize)
+    elseif t.kind == "giver" then
+      -- Quest givers are the least urgent icon: they shrink and fade the farther away they are.
+      local f = min(t.dist / giverRange, 1)
+      size, dim = base * (1 - GIVER_SHRINK * f), 1 - GIVER_FADE * f
     elseif depth and t.limit and t.limit > 0 then
       -- Farther icons are smaller, down to FAR_SCALE of normal at the edge of their range.
       size = max(6, base * (1 - (1 - FAR_SCALE) * min(t.dist / t.limit, 1)))
     end
     size = floor(size * 2 + 0.5) / 2   -- half-pixel steps, so the size is not re-set for tiny changes
     if ic.sz ~= size then ic.sz = size; ic:SetSize(size, size) end
-    -- Icons sit along the edge opposite the ticks, inside the bar.
-    local y = db.height / 2 - size / 2 - 1
-    if db.flipTicks then y = -y end
+    local y
+    if outside then
+      y = (db.height / 2 + size / 2 + 1) * dir   -- just beyond the bar's edge
+    else
+      -- Icons sit along the edge opposite the ticks, inside the bar.
+      y = db.height / 2 - size / 2 - 1
+      if db.flipTicks then y = -y end
+    end
     local showDist = t.primary and db.mk_distance
     local reach = size
     if showDist then
@@ -605,9 +627,10 @@ function ns.LayoutMarkers(b, ppd, half, fade, fadeZone)
       if fade then alpha = max(0, min(1, (half - abs(x)) / fadeZone)) end
       shown = shown + 1
       if ic.ver ~= styleVer or ic.t ~= t then ic.ver = styleVer; ic.t = t; Restyle(ic, t) end
-      -- Distance text goes on the inner side of the icon (toward the bar's middle), never outside the bar
-      -- where it would be clipped.
-      local flip = db.flipTicks and true or false
+      -- Distance text goes on the inner side of the icon (toward the bar's middle) inside the bar, and on the
+      -- outer side when the icons are outside it.
+      local flip                      -- true = distance text above the icon, false = below it
+      if outside then flip = (dir == 1) else flip = db.flipTicks and true or false end
       if ic.flip ~= flip then
         ic.flip = flip
         ic.dist:ClearAllPoints()
@@ -623,7 +646,7 @@ function ns.LayoutMarkers(b, ppd, half, fade, fadeZone)
       end
       ic:ClearAllPoints()
       ic:SetPoint("CENTER", ns.strip, "CENTER", x, y)
-      ic:SetAlpha(alpha)
+      ic:SetAlpha(alpha * dim)
       ic:Show()
       ic.dist:SetShown(showDist)
     end

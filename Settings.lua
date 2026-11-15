@@ -436,7 +436,7 @@ end
 local markerMenu
 local function BuildMarkerMenu()
   local f = CreateFrame("Frame", "CHUDMarkerMenu", UIParent)
-  f:SetSize(500, 596); f:SetFrameStrata("FULLSCREEN_DIALOG"); f:SetToplevel(true)
+  f:SetSize(500, 640); f:SetFrameStrata("FULLSCREEN_DIALOG"); f:SetToplevel(true)
   f:EnableMouse(true); f:SetClampedToScreen(true); f:Hide()
   local b = f:CreateTexture(nil, "BACKGROUND", nil, -1)
   b:SetPoint("TOPLEFT", -1, 1); b:SetPoint("BOTTOMRIGHT", 1, -1); b:SetColorTexture(unpack(BORDER))
@@ -540,7 +540,11 @@ local function BuildMarkerMenu()
     objB.Dim(QuestieHides("objective") ~= nil and QuestieHides("turnin") ~= nil)
     giverB.Dim(QuestieHides("giver") ~= nil)
   end
-  Button(f, "Open Settings", 14, -556, 224, function()
+  local gr = Slider(f, "Giver Fade Distance", 14, -540, 130, 20, 500, 10,
+    function() return ns.db.mk_giverRange end, function(v) ns.db.mk_giverRange = v; ns.MarkersStyle() end,
+    function(v) return format("%d yd", v) end, true)
+  Tip(gr, "Giver Fade Distance", "Quest giver icons are the least urgent, so they get smaller and more transparent the farther away they are. This is the distance at which they are smallest and faintest. Lower it to fade them sooner; raise it to keep them strong for longer.")
+  Button(f, "Open Settings", 14, -600, 224, function()
     f:Hide()
     if ns.categoryID then Settings.OpenToCategory(ns.categoryID) end
   end)
@@ -588,8 +592,10 @@ local function BuildMarkerMenu()
   Tip(sd, "Shadow Distance", "How far the shadow is offset down and to the right of the icon, in pixels.")
   StyleCheck("Smaller When Far", "mk_depth", -490,
     "Icons shrink the farther away they are, down to about 60% of Icon Size at the edge of their range. The focused quest's icon is always the largest, and no icon makes the bar taller.")
+  StyleCheck("Icons Outside Bar", "mk_outside", -513,
+    "Puts the marker icons just outside the bar instead of inside its edge. They go below the bar when it is in the upper half of the screen and above it when it is in the lower half, so they never leave the screen.")
   if ns.QuestAreaSupported and ns.QuestAreaSupported() then
-    StyleCheck("Glow In Quest Area", "mk_areaGlow", -513,
+    StyleCheck("Glow In Quest Area", "mk_areaGlow", -536,
       "The focused quest's icon pulses with a soft glow while you are inside that quest's area (the blue zone on the map).")
   end
   return f

@@ -1,4 +1,4 @@
-CHUD 0.4.0
+CHUD 0.5.0
 
 Questie support. If Questie is installed, CHUD picks up its quest objectives, turn-ins and quest givers and shows them on the bar with Questie's own icons. It switches on by itself and only reads from Questie, it never changes anything there. If one of Questie's own settings is hiding something, the matching CHUD option greys out and its tooltip tells you what to turn on.
 
@@ -11,6 +11,8 @@ Smoother icons. Nearby icons used to jump four times a second. They now update u
 New options. Icons Outside Bar puts the icons just past the edge of the bar. A button at the bottom of the settings page shows or hides the default XP bar.
 
 Themes. Two new themes, Catppuccin and Tokyo Night. A new Daylight checkbox next to the theme list changes the colors with the in-game clock every half hour and locks the color controls while it's on.
+
+Performance. The marker code uses roughly a third of the CPU it did before.
 
 Settings menu. Everything in Display and Experience Bar, plus all the buttons, now has a tooltip.
 

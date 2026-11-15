@@ -5,7 +5,7 @@ with themes, an XP fill built into the bar, fading hairline edges, and optional 
 
 ## Install
 
-Download CHUD-0.4.0.zip.
+Download CHUD-0.5.0.zip.
 
 * Extract it into World of Warcraft\_forever_\Interface\AddOns\. The path should end in AddOns\CHUD\CHUD.toc. Windows’ “Extract All” often creates an extra nested folder, which breaks the addon, so check that CHUD.toc sits directly inside CHUD.
 * Fully restart the game. The new addon probably doesn’t appear with /reload.

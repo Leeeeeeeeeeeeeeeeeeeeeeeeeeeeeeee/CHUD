@@ -6,7 +6,7 @@ Focused quest. Your focused quest gets a bigger icon (it never makes the bar tal
 
 Less clutter. Only the nearest icon of each objective type per quest is shown. Objectives and quest givers shrink and fade the farther away they are, with their own Fade Distance sliders (default 300 yd). Questie Max Distance defaults to 600 yd and goes up to 1000.
 
-Smoother icons. Nearby icons used to jump four times a second. They now update up to 30 times a second while you move, and there's an Icon Update Rate slider if you want to trade smoothness for CPU.
+Smoother icons. Nearby icons used to jump four times a second. They now update up to 12 times a second while you move, and there's an Icon Update Rate slider if you want to trade smoothness for CPU.
 
 New options. Icons Outside Bar puts the icons just past the edge of the bar. A button at the bottom of the settings page shows or hides the default XP bar.
 

@@ -77,7 +77,8 @@ end
 
 -- Built-in themes (cannot be deleted). Default is empty: it is the faction-aware defaults.
 ns.BuiltinNames = { "Default", "Dark", "High Contrast", "Assassins", "Alliance", "Horde", "UNSC", "Nordic", "Azeroth", "Pink",
-  "Tactical", "Tactical Minimal", "Frost", "Frost Minimal", "Ember", "Ember Minimal" }
+  "Tactical", "Tactical Minimal", "Frost", "Frost Minimal", "Ember", "Ember Minimal",
+  "Daylight", "Catppuccin", "Tokyo Night" }
 
 -- Fonts that ship with the game, so themes can use them without any other addon.
 local ARIAL    = { fontName = "Arial Narrow",  fontPath = "Fonts\\ARIALN.TTF" }
@@ -144,6 +145,52 @@ BUILTIN["Tactical Minimal"] = MinimalOf(BUILTIN.Tactical, { 0.02, 0.08, 0.03, 0.
 BUILTIN["Frost Minimal"]    = MinimalOf(BUILTIN.Frost,    { 0.03, 0.08, 0.14, 0.45 })
 BUILTIN["Ember Minimal"]    = MinimalOf(BUILTIN.Ember,    { 0.12, 0.04, 0.01, 0.45 })
 
+-- Catppuccin Mocha and Tokyo Night: two of the most used editor palettes right now. The colors are their
+-- published base, text and accent values; only the colors are borrowed.
+BUILTIN.Catppuccin = Theme({ bg = { 0.118, 0.118, 0.180 }, accent = { 0.796, 0.651, 0.969 },
+  text = { 0.804, 0.839, 0.957 }, north = { 0.953, 0.545, 0.659 }, xp = { 0.537, 0.706, 0.980 } },
+  { bgMode = "solid", bgSolid = { 0.118, 0.118, 0.180, 0.92 }, fadeEdges = true, fadeAmount = 0.30,
+    markerStyle = "notch", outlineWidth = 1, outlineColor = { 0.07, 0.07, 0.11, 1 } })
+BUILTIN["Tokyo Night"] = Theme({ bg = { 0.102, 0.106, 0.149 }, accent = { 0.478, 0.635, 0.969 },
+  text = { 0.753, 0.792, 0.961 }, north = { 0.969, 0.463, 0.557 }, xp = { 0.733, 0.604, 0.969 } },
+  { fadeAmount = 0.50, showDegrees = true, outlineWidth = 1, outlineColor = { 0.04, 0.04, 0.08, 1 } })
+
+-- Daylight: the colors follow the game's clock, in half-hour steps. Each keyframe is { hour, bg, accent, text,
+-- north, xp }; the half-hour in between is blended from its two neighbours.
+local DAY = {
+  { 0.0,  { 0.03, 0.04, 0.10 }, { 0.55, 0.62, 0.95 }, { 0.80, 0.84, 0.95 }, { 0.95, 0.55, 0.60 }, { 0.35, 0.40, 0.85 } },  -- midnight
+  { 5.5,  { 0.18, 0.10, 0.18 }, { 1.00, 0.62, 0.45 }, { 1.00, 0.90, 0.85 }, { 1.00, 0.85, 0.60 }, { 0.95, 0.50, 0.40 } },  -- dawn
+  { 8.0,  { 0.10, 0.16, 0.24 }, { 1.00, 0.85, 0.45 }, { 0.95, 0.96, 1.00 }, { 1.00, 1.00, 0.90 }, { 0.40, 0.70, 0.95 } },  -- morning
+  { 12.0, { 0.08, 0.20, 0.32 }, { 1.00, 0.92, 0.55 }, { 1.00, 1.00, 1.00 }, { 1.00, 0.95, 0.80 }, { 0.30, 0.75, 1.00 } },  -- noon
+  { 17.0, { 0.24, 0.13, 0.06 }, { 1.00, 0.70, 0.25 }, { 1.00, 0.93, 0.80 }, { 1.00, 0.85, 0.50 }, { 1.00, 0.60, 0.20 } },  -- golden hour
+  { 19.5, { 0.20, 0.08, 0.22 }, { 0.95, 0.50, 0.60 }, { 1.00, 0.88, 0.92 }, { 1.00, 0.75, 0.55 }, { 0.80, 0.35, 0.60 } },  -- dusk
+  { 22.0, { 0.05, 0.06, 0.14 }, { 0.60, 0.65, 1.00 }, { 0.82, 0.86, 0.98 }, { 0.95, 0.55, 0.60 }, { 0.40, 0.45, 0.90 } },  -- night
+  { 24.0, { 0.03, 0.04, 0.10 }, { 0.55, 0.62, 0.95 }, { 0.80, 0.84, 0.95 }, { 0.95, 0.55, 0.60 }, { 0.35, 0.40, 0.85 } },  -- midnight again
+}
+local function Mix(a, b, f)
+  return { a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f, a[3] + (b[3] - a[3]) * f }
+end
+-- The half-hour of the game's day (0-47). GetGameTime is the realm clock the in-game UI shows.
+local function DayBucket()
+  local h, m = 12, 0
+  if GetGameTime then
+    local ok, hh, mm = pcall(GetGameTime)
+    if ok and type(hh) == "number" and type(mm) == "number" then h, m = hh, mm end
+  end
+  return h * 2 + (m >= 30 and 1 or 0)
+end
+local function DaylightTheme(bucket)
+  local t = bucket / 2
+  local a, b = DAY[1], DAY[#DAY]
+  for i = 1, #DAY - 1 do
+    if t >= DAY[i][1] and t <= DAY[i + 1][1] then a, b = DAY[i], DAY[i + 1]; break end
+  end
+  local f = (t - a[1]) / max(b[1] - a[1], 0.001)
+  return Theme({ bg = Mix(a[2], b[2], f), accent = Mix(a[3], b[3], f), text = Mix(a[4], b[4], f),
+    north = Mix(a[5], b[5], f), xp = Mix(a[6], b[6], f) }, { outlineWidth = 1 })
+end
+BUILTIN.Daylight = DaylightTheme(DayBucket())
+
 local function Equal(a, b)
   if type(a) == "table" and type(b) == "table" then
     for k, v in pairs(a) do if not Equal(v, b[k]) then return false end end
@@ -160,6 +207,7 @@ function ns.IsBuiltin(name) return BUILTIN[name] ~= nil end
 -- Full key set for a theme. Missing keys fall back to defaults, so themes saved by an older
 -- version still work after new settings are added.
 function ns.GetThemeData(name)
+  if name == "Daylight" then BUILTIN.Daylight = DaylightTheme(DayBucket()) end   -- always the current half-hour
   local src = BUILTIN[name] or (ns.db.themes and ns.db.themes[name])
   if not src then return nil end
   local data = {}
@@ -200,6 +248,7 @@ function ns.ApplyTheme(name)
   local data = ns.GetThemeData(name)
   if not data then return end
   for _, k in ipairs(KEYS) do ns.db[k] = data[k] end
+  ns.db.dynTheme = (name == "Daylight") and DayBucket() or nil   -- remember which half-hour is applied
   ns.Apply()
   if ns.RefreshSettings then ns.RefreshSettings() end
 end
@@ -215,3 +264,30 @@ function ns.DeleteTheme(name)
   if ns.db.themes then ns.db.themes[name] = nil end
   if ns.OnSettingsChanged then ns.OnSettingsChanged() end
 end
+
+-- Keeps Daylight in step with the game clock: every 30 real seconds, if the half-hour has changed, the new colors are
+-- applied, but only while the settings still equal the Daylight look that was applied. Once the player changes anything
+-- (or picks another theme) the theme stops following the clock, so it never overwrites their edits.
+local dayAcc = 0
+local dayFrame = CreateFrame("Frame")
+dayFrame:SetScript("OnUpdate", function(_, elapsed)
+  dayAcc = dayAcc + elapsed
+  if dayAcc < 30 then return end
+  dayAcc = 0
+  local db = ns.db
+  if not db or not db.dynTheme then return end
+  local now = DayBucket()
+  if now == db.dynTheme then return end
+  local applied = DaylightTheme(db.dynTheme)   -- what was applied; missing keys fall back to the defaults
+  local same = true
+  for _, k in ipairs(KEYS) do
+    local v = applied[k]
+    if v == nil then v = ns.defaults[k] end
+    if not Equal(db[k], v) then same = false; break end
+  end
+  if same then
+    ns.ApplyTheme("Daylight")
+  else
+    db.dynTheme = nil
+  end
+end)

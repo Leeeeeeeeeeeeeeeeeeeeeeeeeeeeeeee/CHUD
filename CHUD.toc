@@ -4,7 +4,7 @@
 ## Author: skullfurious
 ## X-License: MIT
 ## IconTexture: Interface\AddOns\CHUD\icon.tga
-## Version: 0.3.0
+## Version: 0.4.0
 ## SavedVariables: CHUDDB
 
 CHUD.lua

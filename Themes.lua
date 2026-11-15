@@ -289,6 +289,46 @@ function ns.DeleteTheme(name)
   if ns.OnSettingsChanged then ns.OnSettingsChanged() end
 end
 
+-- /chud daydemo: sweeps the Daylight colors through a whole day in DEMO_SECONDS, with a clock under the bar, for
+-- recording a GIF. Your own colors (or the live Daylight colors) are put back at the end. Running it again stops it.
+local DEMO_SECONDS = 16
+local demo = CreateFrame("Frame")
+demo:Hide()
+local demoClock
+local demoSaved, demoT
+demo:SetScript("OnUpdate", function(self, elapsed)
+  demoT = demoT + elapsed
+  local hour = demoT / DEMO_SECONDS * 24
+  if hour >= 24 then ns.StopDaylightDemo(); return end
+  for k, v in pairs(DaylightPalette(hour * 2)) do
+    if k ~= "mk_color" then ns.db[k] = v end
+  end
+  ns.Apply()
+  demoClock:SetText(format("%02d:%02d", floor(hour), floor((hour % 1) * 60 / 30) * 30))   -- half-hour steps, like the real thing
+end)
+function ns.StopDaylightDemo()
+  if not demoSaved then return end
+  demo:Hide()
+  for k, v in pairs(demoSaved) do ns.db[k] = v end
+  demoSaved = nil
+  demoClock:Hide()
+  if ns.db.daylight then ApplyDaylightColors() end   -- if Daylight is on, go straight back to the current time's colors
+  ns.Apply()
+  if ns.RefreshSettings then ns.RefreshSettings() end
+end
+function ns.DaylightDemo()
+  if demoSaved then ns.StopDaylightDemo(); return end
+  if not demoClock then
+    demoClock = UIParent:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    demoClock:SetPoint("TOP", ns.root, "BOTTOM", 0, -10)
+  end
+  demoSaved = {}
+  for _, k in ipairs(ns.COLOR_KEYS) do demoSaved[k] = ns.Copy(ns.db[k]) end
+  demoT = 0
+  demoClock:SetText("00:00"); demoClock:Show()
+  demo:Show()
+end
+
 -- Keeps Daylight in step with the game clock: when the half-hour has changed, the new colors are applied. The first check
 -- runs right away (so login catches up), then one every 30 real seconds.
 local dayAcc = 30
@@ -299,7 +339,7 @@ dayFrame:SetScript("OnUpdate", function(_, elapsed)
   local db = ns.db
   if not db then return end
   dayAcc = 0
-  if db.daylight and db.dayBucket ~= DayBucket() then
+  if db.daylight and not demoSaved and db.dayBucket ~= DayBucket() then
     ApplyDaylightColors()
     ns.Apply()
     if ns.RefreshSettings then ns.RefreshSettings() end

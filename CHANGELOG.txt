@@ -1,25 +1,17 @@
 CHUD 0.4.0
 
-Questie support
-CHUD now reads Questie's data and shows its icons on the compass. It turns on by itself when Questie is installed and never changes anything in Questie. Quest objectives, turn-ins and quest givers use Questie's own art, so a loot objective shows as a bag and a kill objective as a sword. If Questie hides something in its own options, the matching CHUD option greys out and its tooltip tells you which Questie setting to turn on.
+Questie support. If Questie is installed, CHUD picks up its quest objectives, turn-ins and quest givers and shows them on the bar with Questie's own icons. It switches on by itself and only reads from Questie, it never changes anything there. If one of Questie's own settings is hiding something, the matching CHUD option greys out and its tooltip tells you what to turn on.
 
-Focused quest
-Your focused quest gets one larger marker, and every other objective of that quest still shows as a normal icon. The large marker never makes the bar taller. Clicking any smaller quest objective on the bar makes that quest the focused one. The new Focused Quest Only option hides every other quest's Questie icons. Standing inside the quest area can make the focused marker glow, using the same quest area the game's own quest helper uses (Glow In Quest Area, shown only if the client supports it).
+Focused quest. Your focused quest gets a bigger icon (it never makes the bar taller) and its other objectives still show as normal icons. Click any smaller objective on the bar to focus that quest. There's a Focused Quest Only option, and the focused icon can glow while you're standing in the quest area.
 
-Distance and clutter control
-Questie Max Distance (default 600 yd, up to 1000 yd) sets how far away Questie icons appear. Only the nearest icon of each objective type per quest is shown. Quest objectives and quest givers now shrink and fade with distance. Objective Fade Distance and Giver Fade Distance both default to 300 yd. Smaller When Far still applies to the other marker types.
+Less clutter. Only the nearest icon of each objective type per quest is shown. Objectives and quest givers shrink and fade the farther away they are, with their own Fade Distance sliders (default 300 yd). Questie Max Distance defaults to 600 yd and goes up to 1000.
 
-Smoother icons
-Icons within about 150 yd used to jump four times a second. They now update up to 30 times a second while you move, and only the icons are redrawn. The new Icon Update Rate slider (4 to 60 per second) lets you trade smoothness for CPU. Standing still costs nothing extra.
+Smoother icons. Nearby icons used to jump four times a second. They now update up to 30 times a second while you move, and there's an Icon Update Rate slider if you want to trade smoothness for CPU.
 
-Icon placement
-New option Icons Outside Bar puts the marker icons just beyond the bar's edge, below it when the bar is in the upper half of the screen and above it otherwise.
+New options. Icons Outside Bar puts the icons just past the edge of the bar. A button at the bottom of the settings page shows or hides the default XP bar.
 
-Themes
-Two new built-in themes, Catppuccin and Tokyo Night, use the colors of two popular editor palettes. A new Daylight checkbox next to the theme list makes the colors follow the game's clock every half hour. While it is on, every color control is greyed out and the box reads Daylight On: Colors Locked. Turning it off brings your previous colors back.
+Themes. Two new themes, Catppuccin and Tokyo Night. A new Daylight checkbox next to the theme list changes the colors with the in-game clock every half hour and locks the color controls while it's on.
 
-Settings menu
-Every option in the Display and Experience Bar sections, the background and marker style choices and all the buttons now have tooltips. Clicking a checkbox's label now works as well as clicking the box. A new button at the bottom of the settings page shows or hides the default game XP bar. Quest Objectives and Turn-Ins is on by default.
+Settings menu. Everything in Display and Experience Bar, plus all the buttons, now has a tooltip.
 
-Notes
-Settings you saved in 0.3.0 are kept, including your distances, so the new defaults only apply if you reset or have not changed those sliders. CHUD is licensed under the MIT license.
+Your 0.3.0 settings carry over, so the new default distances only apply if you reset them.

@@ -17,6 +17,12 @@ Download CHUD-0.3.0.zip.
 - `/chud` opens settings.
 - Right-click the bar for the quick menu (markers, unlock, center).
 
+## Questie
+
+If Questie is installed, CHUD uses its map icons for quest objectives, turn-ins and quest givers, and turns this on
+automatically. The focused quest gets the largest icon, other icons shrink with distance, and clicking a quest icon on the
+bar focuses that quest. Questie options are in the right-click menu. Without Questie, CHUD uses the game's own quest markers.
+
 ## Status
 
 Beta. The marker features depend on map and quest APIs that have not been fully tested on Forever. I was able to get some things partially working but I need feedback going forward.

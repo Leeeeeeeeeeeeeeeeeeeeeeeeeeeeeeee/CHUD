@@ -31,7 +31,7 @@ local FADE_ALPHA = 0.50    -- ... and this much more transparent (both ease in w
 local FADE_RANGE = { giver = { "mk_giverRange", 300 }, objective = { "mk_objRange", 300 } }
 local FAR_SCALE = 0.6     -- an icon at its maximum range is this fraction of normal size (when Smaller When Far is on)
 local TICK = 0.25       -- seconds between bearing updates
-local REFRESH = 2.0     -- seconds between full re-queries (events also trigger one)
+local REFRESH = 4.0     -- seconds between full re-queries (events and the Questie callback also trigger one)
 local MAX_NODES = 500   -- recorded spots kept per kind per map
 local DEDUPE = 15       -- yards: a new gather within this of a recorded spot is the same spot
 
@@ -250,6 +250,7 @@ local function AddQuestie(chain, focus)
   for qid, names in pairs(frames) do
     if Num(qid) and (qid == focus or not focusOnly) and type(names) == "table" then
       local promote = trackedOn and qid == focus and qid ~= trackedQuest   -- no game waypoint for it: Questie provides the primary
+      local title   -- looked up once per quest, not once per icon
       for _, name in pairs(names) do
         local fr = _G[name]
         local d = type(fr) == "table" and fr.data
@@ -263,9 +264,15 @@ local function AddQuestie(chain, focus)
             t.mapID, t.x, t.y, t.questID, t.src = fr.UiMapID, fr.x / 100, fr.y / 100, qid, "questie"
             t.focus, t.primary = promote or nil, nil
             t.file = type(Qe.usedIcons) == "table" and Qe.usedIcons[d.Icon] or nil   -- Questie's art for this objective type (bag, sword...)
-            t.group = "q" .. qid .. ":" .. tostring(d.Icon)
-            local qd = d.QuestData
-            t.label = Try(C_QuestLog.GetTitleForQuestID, qid) or (type(qd) == "table" and type(qd.name) == "string" and qd.name) or nil
+            if t.gq ~= qid or t.gi ~= d.Icon then   -- the group key is a string, so build it only when it changes
+              t.gq, t.gi = qid, d.Icon
+              t.group = "q" .. qid .. ":" .. tostring(d.Icon)
+            end
+            if title == nil then
+              local qd = d.QuestData
+              title = Try(C_QuestLog.GetTitleForQuestID, qid) or (type(qd) == "table" and type(qd.name) == "string" and qd.name) or false
+            end
+            t.label = title or nil
             targets[#targets + 1] = t
           end
         end
@@ -344,11 +351,13 @@ local function TargetXY(t, pm)
   return t.cx, t.cy
 end
 
--- Distance (yards) and compass bearing (degrees) from the player to a point on the same map.
-local function Aim(tx, ty, px, py, w, h)
+-- Distance (yards) from the player to a point on the same map, plus the east/north offsets the bearing is made from.
+-- Every target needs its distance each tick, but the bearing (atan2) is only worked out for the few that are kept.
+local function Dist(tx, ty, px, py, w, h)
   local east, north = (tx - px) * w, -(ty - py) * h   -- map y grows southward
-  return sqrt(east * east + north * north), (deg(atan2(east, north))) % 360
+  return sqrt(east * east + north * north), east, north
 end
+local function Bearing(east, north) return (deg(atan2(east, north))) % 360 end
 
 local function SortFn(a, b)
   if a.primary ~= b.primary then return a.primary end
@@ -356,6 +365,7 @@ local function SortFn(a, b)
 end
 
 local lastCount, tickNo = 0, 0
+local lastPm, lastW, lastH   -- the player's map and its size in yards, as of the last full Tick (FastTick reuses them)
 local lastPX, lastPY   -- the player's map position at the last full Tick or FastTick (FastTick skips when it is unchanged)
 local best = {}   -- nearest candidate per group, rebuilt every tick
 local function Tick()
@@ -369,6 +379,7 @@ local function Tick()
     local w, h = Try(C_Map.GetMapWorldSize, pm)
     if px and Num(w) and Num(h) and w > 0 and h > 0 then
       lastPX, lastPY = px, py
+      lastPm, lastW, lastH = pm, w, h
       local range, qRange = db.mk_range or 500, db.mk_qRange or 600
       wipe(best)
       local fNear   -- nearest icon of the focused quest (when Questie supplies its primary marker)
@@ -376,12 +387,12 @@ local function Tick()
         local t = targets[i]
         local tx, ty = TargetXY(t, pm)
         if tx then
-          local dist, bearing = Aim(tx, ty, px, py, w, h)
+          local dist, east, north = Dist(tx, ty, px, py, w, h)
           local limit = (t.src == "questie") and qRange or range
           if t.focus then
             -- An icon of the focused quest: it shows like any other (nearest per type, within range), and the
             -- nearest one overall, however far, becomes the primary marker below.
-            t.dist, t.limit, t.bearing = dist, limit, bearing
+            t.dist, t.limit, t.east, t.north = dist, limit, east, north
             t.primary, t.kind = nil, t.baseKind
             if not fNear or dist < fNear.dist then fNear = t end
             if t.shows and dist <= limit then
@@ -389,7 +400,7 @@ local function Tick()
               if not cur or dist < cur.dist then best[t.group] = t end
             end
           elseif t.primary or dist <= limit then
-            t.dist, t.limit, t.bearing = dist, limit, bearing
+            t.dist, t.limit, t.east, t.north = dist, limit, east, north
             local g = t.group
             if g then
               local cur = best[g]
@@ -409,6 +420,7 @@ local function Tick()
       for i = #active, MAX_ICONS + 1, -1 do active[i] = nil end
       for i = 1, #active do
         local t = active[i]
+        t.bearing = Bearing(t.east, t.north)
         -- Only worth a redraw if the icon is new to the bar, moved at least 0.15 degrees, or its 5-yard distance label changed.
         local d5 = floor(t.dist / 5)
         if t.seen ~= tickNo - 1 or not t.drawn or abs(t.bearing - t.drawn) > 0.15 or d5 ~= t.drawnD then
@@ -592,9 +604,11 @@ local function OutsideDir()
   return -1
 end
 
+local lastLayoutAt = -1   -- GetTime() of the last LayoutMarkers, so FastTick does not repeat a layout done this frame
 local lastB, lastPpd, lastHalf, lastFade, lastZone   -- the compass's latest layout, so icons can be re-placed alone
 function ns.LayoutMarkers(b, ppd, half, fade, fadeZone)
   lastB, lastPpd, lastHalf, lastFade, lastZone = b, ppd, half, fade, fadeZone
+  lastLayoutAt = GetTime()
   local db = ns.db
   local base = db.mk_size or 16
   local maxSize = max(base, db.height - 2)   -- the focused icon never makes the bar taller
@@ -685,26 +699,25 @@ ns.LayoutMarkers = ns.Perf("LayoutMarkers", ns.LayoutMarkers)
 -- compass. Standing still costs nothing: the player's position is unchanged, so it returns at once.
 local NEAR = 150
 local function FastTick()
-  if not lastB or #active == 0 then return end
+  if not lastB or #active == 0 or not lastPm then return end
   local near = false
   for i = 1, #active do
     if active[i].dist < NEAR then near = true; break end
   end
   if not near then return end
-  local pm = Try(C_Map.GetBestMapForUnit, "player")
-  local px, py = XY(pm and Try(C_Map.GetPlayerMapPosition, pm, "player"))
+  local px, py = XY(Try(C_Map.GetPlayerMapPosition, lastPm, "player"))
   if not px or (px == lastPX and py == lastPY) then return end
   lastPX, lastPY = px, py
-  local w, h = Try(C_Map.GetMapWorldSize, pm)
-  if not (Num(w) and Num(h) and w > 0 and h > 0) then return end
   for i = 1, #active do
     local t = active[i]
-    local tx, ty = TargetXY(t, pm)
+    local tx, ty = TargetXY(t, lastPm)
     if tx then
-      t.dist, t.bearing = Aim(tx, ty, px, py, w, h)
-      t.drawn, t.drawnD = t.bearing, floor(t.dist / 5)   -- keep Tick's change detection in step
+      local dist, east, north = Dist(tx, ty, px, py, lastW, lastH)
+      t.dist, t.bearing = dist, Bearing(east, north)
+      t.drawn, t.drawnD = t.bearing, floor(dist / 5)   -- keep Tick's change detection in step
     end
   end
+  if lastLayoutAt == GetTime() then return end   -- the compass already redrew the icons this frame, with these positions
   ns.LayoutMarkers(lastB, lastPpd, lastHalf, lastFade, lastZone)
 end
 FastTick = ns.Perf("FastTick", FastTick)

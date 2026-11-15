@@ -42,7 +42,7 @@ ns.defaults = {
   mk_distance = true,      -- distance under the tracked marker
   mk_size = 16, mk_range = 500,
   mk_questie = true,       -- use Questie's icons for quests when Questie is installed
-  mk_qRange = 100,         -- yards: Questie icons farther than this are hidden (the focused quest ignores it)
+  mk_qRange = 600,         -- yards: Questie icons farther than this are hidden (the focused quest ignores it)
   mk_qFocusOnly = false,   -- show Questie icons only for the focused quest
   mk_areaGlow = true,      -- the focused quest's icon glows while you are inside that quest's area (if the client reports it)
   mk_rate = 30,            -- updates per second for close-up icons while you move (higher = smoother, a little more CPU)

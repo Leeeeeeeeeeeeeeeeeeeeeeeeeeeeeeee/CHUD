@@ -535,7 +535,7 @@ local function BuildMarkerMenu()
     "When Questie is installed, quest objectives, turn-ins and quest givers come from Questie's map icons instead of the game's. Turned on automatically once Questie is detected. Untick it to go back to the game's own quest markers. Quest Objectives and Quest Givers above still decide which kinds show.")
   local focusOnly = C("Focused Quest Only", "mk_qFocusOnly", -459,
     "Shows Questie icons only for the quest you have focused (click a quest icon on the bar, or focus it in Questie's tracker or the quest log). Every other quest icon is hidden.")
-  local qr = Slider(f, "Questie Max Distance", 14, -492, 130, 20, 500, 10,
+  local qr = Slider(f, "Questie Max Distance", 14, -492, 130, 20, 1000, 10,
     function() return ns.db.mk_qRange end, function(v) ns.db.mk_qRange = v; ns.MarkersChanged() end,
     function(v) return format("%d yd", v) end, true)
   Tip(qr, "Questie Max Distance", "Questie icons farther away than this are hidden. Questie draws one icon per spawn, so only the nearest icon of each quest is shown. The focused quest's marker ignores this and always shows.")

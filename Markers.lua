@@ -369,7 +369,7 @@ local function Tick()
     local w, h = Try(C_Map.GetMapWorldSize, pm)
     if px and Num(w) and Num(h) and w > 0 and h > 0 then
       lastPX, lastPY = px, py
-      local range, qRange = db.mk_range or 500, db.mk_qRange or 100
+      local range, qRange = db.mk_range or 500, db.mk_qRange or 600
       wipe(best)
       local fNear   -- nearest icon of the focused quest (when Questie supplies its primary marker)
       for i = 1, #targets do
@@ -879,7 +879,7 @@ function ns.MarkerDebug()
                   local dx, dy = (fr.x / 100 - x) * w, (fr.y / 100 - y) * h
                   local dist = sqrt(dx * dx + dy * dy)
                   if not nearest or dist < nearest then nearest, nearestQuest = dist, qid end
-                  if dist <= (db.mk_qRange or 100) then g.near = g.near + 1 end
+                  if dist <= (db.mk_qRange or 600) then g.near = g.near + 1 end
                 end
               end
             end
@@ -888,7 +888,7 @@ function ns.MarkerDebug()
       end
     end
     print("  questie givers:", "total", g.all, "| hidden (world map copy)", g.hiddenWorld, "(minimap copy)", g.hiddenMini,
-      "| shown", g.shown, "| on this map", g.onMap, "| within", db.mk_qRange or 100, "yd", g.near,
+      "| shown", g.shown, "| on this map", g.onMap, "| within", db.mk_qRange or 600, "yd", g.near,
       "| nearest", nearest and format("%d yd (quest %s)", floor(nearest), tostring(nearestQuest)) or "none on this map")
     local list = {}
     for m, n in pairs(byMap) do list[#list + 1] = { m = m, n = n } end

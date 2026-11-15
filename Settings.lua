@@ -37,6 +37,11 @@ local function Check(parent, text, x, y, get, set)
   fs:SetPoint("LEFT", b, "RIGHT", 6, 0); fs:SetText(text)
   b:SetScript("OnClick", function(self) set(self:GetChecked() and true or false); Refresh() end)
   refreshers[#refreshers + 1] = function() b:SetChecked(get()) end
+  b.Dim = function(off)   -- grey out and block clicks (used for options that need something else enabled)
+    b:SetEnabled(not off)
+    local v = off and 0.45 or 1
+    fs:SetTextColor(v, v, v)
+  end
   return b
 end
 
@@ -53,7 +58,7 @@ end
 -- The idle value is a plain FontString (reliable to render); an EditBox only appears while typing.
 local function Slider(parent, text, x, y, width, minv, maxv, step, get, set, fmt, editable, scale, maxFn, default)
   scale = scale or 1
-  if text then Label(parent, text, x, y, "GameFontNormal") end
+  local title = text and Label(parent, text, x, y, "GameFontNormal")
   local s = CreateFrame("Slider", nil, parent)
   s:SetOrientation("HORIZONTAL"); s:SetSize(width, 14)
   s:SetPoint("TOPLEFT", x, text and (y - 20) or y)
@@ -132,6 +137,12 @@ local function Slider(parent, text, x, y, width, minv, maxv, step, get, set, fmt
     if maxFn then s:SetMinMaxValues(minv, maxFn()) end
     s:SetValue(get()); show()
     refreshing = false
+  end
+  s.Dim = function(off)   -- grey out and block input
+    local a = off and 0.4 or 1
+    s:SetAlpha(a); s:EnableMouse(not off)
+    if title then title:SetAlpha(a) end
+    if box then box:SetAlpha(a); box:EnableMouse(not off) else val:SetAlpha(a) end
   end
   return s
 end
@@ -456,6 +467,7 @@ local function BuildMarkerMenu()
     local b = Check(f, text, 14, y, g2, s2)
     b:SetHitRectInsets(0, -190, 0, 0)   -- hovering the label counts too
     Tip(b, text, tip)
+    return b
   end
   local function Section(text, y) Header(f, text, 14, y, 224) end
 
@@ -490,14 +502,20 @@ local function BuildMarkerMenu()
     if _G.Questie then qs:SetText("Questie detected"); qs:SetTextColor(0.4, 0.9, 0.4)
     else qs:SetText("Questie not detected"); qs:SetTextColor(0.65, 0.65, 0.65) end
   end
-  C("Use Questie Markers", "mk_questie", -436,
+  local useQ = C("Use Questie Markers", "mk_questie", -436,
     "When Questie is installed, quest objectives, turn-ins and quest givers come from Questie's map icons instead of the game's. Turned on automatically once Questie is detected. Untick it to go back to the game's own quest markers. Quest Objectives and Quest Givers above still decide which kinds show.")
-  C("Focused Quest Only", "mk_qFocusOnly", -459,
+  local focusOnly = C("Focused Quest Only", "mk_qFocusOnly", -459,
     "Shows Questie icons only for the quest you have focused (click a quest icon on the bar, or focus it in Questie's tracker or the quest log). Every other quest icon is hidden.")
   local qr = Slider(f, "Questie Max Distance", 14, -492, 130, 20, 500, 10,
     function() return ns.db.mk_qRange end, function(v) ns.db.mk_qRange = v; ns.MarkersChanged() end,
     function(v) return format("%d yd", v) end, true)
   Tip(qr, "Questie Max Distance", "Questie icons farther away than this are hidden. Questie draws one icon per spawn, so only the nearest icon of each quest is shown. The focused quest's marker ignores this and always shows.")
+  -- These only mean something with Questie: grey them out when it is missing or turned off.
+  refreshers[#refreshers + 1] = function()
+    local installed = _G.Questie ~= nil
+    local active = installed and ns.db.mk_questie ~= false
+    useQ.Dim(not installed); focusOnly.Dim(not active); qr.Dim(not active)
+  end
   Button(f, "Open Settings", 14, -556, 224, function()
     f:Hide()
     if ns.categoryID then Settings.OpenToCategory(ns.categoryID) end

@@ -80,7 +80,9 @@ end
 -- icon positions come from its map frame registry (QuestieMap.questIdFrames). That table is internal
 -- to Questie: every access is guarded, so if it changes, Questie support quietly turns itself off
 -- and the game's own quest data is used instead.
-local Q = { map = nil, utils = nil, kinds = nil, hooked = false }
+-- CHUD only READS Questie's data. The one thing it hands Questie is a callback through Questie's own
+-- RegisterForQuestUpdates, which is how Questie asks other addons to listen.
+local Q = { map = nil, kinds = nil, hooked = false }
 local qcache = setmetatable({}, { __mode = "k" })   -- Questie icon frame -> its reusable target table
 local questieActive = false
 
@@ -91,7 +93,6 @@ local function QuestieReady()
     local L = _G.QuestieLoader
     if type(L) == "table" and L.ImportModule then
       Q.map = Try(L.ImportModule, L, "QuestieMap")
-      Q.utils = Try(L.ImportModule, L, "TrackerUtils")
     end
     if type(Q.map) ~= "table" then Q.map = nil; return end
   end
@@ -126,14 +127,19 @@ end
 
 local function UseQuestie() return ns.db and ns.db.mk_questie ~= false and QuestieReady() end
 
--- The quest the player has focused: Questie's focus, else the game's super-tracked quest.
+-- The quest the player has focused. The game's super-tracked quest is the single source of truth: Questie
+-- follows it, and so does CHUD, so the two can never disagree. Questie's own focus (read only) is used just
+-- when the client has no super-tracking at all.
 local function FocusedQuest()
+  local ST = C_SuperTrack
+  if ST and type(ST.GetSuperTrackedQuestID) == "function" then
+    local sq = Try(ST.GetSuperTrackedQuestID)
+    if Num(sq) and sq > 0 then return sq end
+    return nil
+  end
   local Qe = _G.Questie
   local f = type(Qe) == "table" and type(Qe.db) == "table" and type(Qe.db.char) == "table" and Qe.db.char.TrackerFocus
   if Num(f) and f > 0 then return f end
-  local ST = C_SuperTrack
-  local s = ST and Try(ST.GetSuperTrackedQuestID)
-  if Num(s) and s > 0 then return s end
 end
 
 -- Does the client tell us whether the player is inside a quest's area (the blue blob on the map)?
@@ -224,10 +230,12 @@ local function AddQuests(chain)
   end
 end
 
--- Questie's icons for the player's map. Questie draws one icon per spawn, so each quest and kind is
--- grouped here and Tick keeps only the nearest of each group, which keeps the bar readable. Icons of the
+-- Questie's icons for the player's map. Questie draws one icon per spawn (on both the world map and the
+-- minimap, and an icon can be hidden on one but not the other), so each quest and icon type is grouped here and
+-- Tick keeps only the nearest of each group, which keeps the bar readable. Icons of the
 -- focused quest become the primary marker when the game gave no waypoint for it.
 local function AddQuestie(chain, focus)
+  local Qe = _G.Questie
   local frames = Q.map.questIdFrames
   if type(frames) ~= "table" then return end
   local onMap = {}
@@ -239,7 +247,7 @@ local function AddQuestie(chain, focus)
       for _, name in pairs(names) do
         local fr = _G[name]
         local d = type(fr) == "table" and fr.data
-        if d and not fr.miniMapIcon and not fr.hidden and onMap[fr.UiMapID] and Num(fr.x) and Num(fr.y) then
+        if d and not fr.hidden and onMap[fr.UiMapID] and Num(fr.x) and Num(fr.y) then
           local kind = Q.kinds[d.Icon]
           local asKind, primary
           if kind then
@@ -254,7 +262,8 @@ local function AddQuestie(chain, focus)
             if not t then t = {}; qcache[fr] = t end
             t.kind, t.mapID, t.x, t.y, t.questID, t.src = asKind, fr.UiMapID, fr.x / 100, fr.y / 100, qid, "questie"
             t.primary = primary
-            t.group = primary and ("f" .. qid) or ("q" .. qid .. asKind)
+            t.file = type(Qe.usedIcons) == "table" and Qe.usedIcons[d.Icon] or nil   -- Questie's art for this objective type (bag, sword...)
+            t.group = primary and ("f" .. qid) or ("q" .. qid .. ":" .. tostring(d.Icon))
             local qd = d.QuestData
             t.label = Try(C_QuestLog.GetTitleForQuestID, qid) or (type(qd) == "table" and type(qd.name) == "string" and qd.name) or nil
             targets[#targets + 1] = t
@@ -409,14 +418,12 @@ local KIND_LABEL = {
   box = "Container (Saved Spot)",
 }
 
--- Clicking a quest icon focuses that quest. Questie's own focus is used when Questie is present (it also
--- fades its other icons); otherwise the game's super-tracked quest is set.
+-- Clicking a quest icon focuses that quest by setting the game's super-tracked quest. Questie follows that
+-- on its own (when its "follow super tracking" option is on); CHUD never writes to Questie.
 local function Focusable(t)
   return t and t.questID and not t.primary and (t.kind == "objective" or t.kind == "turnin")
 end
 local function FocusQuest(qid)
-  local TU = Q.utils
-  if type(TU) == "table" and TU.FocusQuest and Try(TU.FocusQuest, TU, qid) then needRebuild = true; return end
   local ST = C_SuperTrack
   if ST and ST.SetSuperTrackedQuestID then pcall(ST.SetSuperTrackedQuestID, qid) end
   needRebuild = true
@@ -500,6 +507,7 @@ local function GetIcon(i)
 end
 
 local function SetIcon(tex, t)
+  if t.file then tex:SetTexture(t.file); tex:SetTexCoord(0, 1, 0, 1); return end   -- Questie's own icon art
   local spec = ICON[t.kind] or {}
   local list = t.atlas and { t.atlas } or spec.atlases
   if list and C_Texture and C_Texture.GetAtlasInfo then
@@ -745,5 +753,26 @@ function ns.MarkerDebug()
     else qstate = "in use" end
   end
   print("  questie:", qstate)
+  if _G.Questie and Q.map and type(Q.map.questIdFrames) == "table" then
+    local n = { total = 0, hidden = 0, mini = 0, other = 0 }
+    local byKind = {}
+    for _, names in pairs(Q.map.questIdFrames) do
+      if type(names) == "table" then
+        for _, name in pairs(names) do
+          local fr = _G[name]
+          local d = type(fr) == "table" and fr.data
+          if d then
+            n.total = n.total + 1
+            if fr.hidden then n.hidden = n.hidden + 1 end
+            if fr.miniMapIcon then n.mini = n.mini + 1 end
+            local k = Q.kinds and Q.kinds[d.Icon]
+            if k and not fr.hidden then byKind[k] = (byKind[k] or 0) + 1 else n.other = n.other + 1 end
+          end
+        end
+      end
+    end
+    print("  questie icons:", "total", n.total, "| hidden by Questie", n.hidden, "| minimap copies", n.mini,
+      "| usable: objective", byKind.objective or 0, "giver", byKind.giver or 0, "turnin", byKind.turnin or 0, "| skipped", n.other)
+  end
   print("  quest area glow:", AreaApi() and "supported" or "not supported by this client")
 end

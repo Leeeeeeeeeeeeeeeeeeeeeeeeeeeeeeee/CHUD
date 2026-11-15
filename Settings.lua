@@ -436,7 +436,7 @@ end
 local markerMenu
 local function BuildMarkerMenu()
   local f = CreateFrame("Frame", "CHUDMarkerMenu", UIParent)
-  f:SetSize(500, 640); f:SetFrameStrata("FULLSCREEN_DIALOG"); f:SetToplevel(true)
+  f:SetSize(500, 690); f:SetFrameStrata("FULLSCREEN_DIALOG"); f:SetToplevel(true)
   f:EnableMouse(true); f:SetClampedToScreen(true); f:Hide()
   local b = f:CreateTexture(nil, "BACKGROUND", nil, -1)
   b:SetPoint("TOPLEFT", -1, 1); b:SetPoint("BOTTOMRIGHT", 1, -1); b:SetColorTexture(unpack(BORDER))
@@ -540,11 +540,15 @@ local function BuildMarkerMenu()
     objB.Dim(QuestieHides("objective") ~= nil and QuestieHides("turnin") ~= nil)
     giverB.Dim(QuestieHides("giver") ~= nil)
   end
-  local gr = Slider(f, "Giver Fade Distance", 14, -540, 130, 20, 500, 10,
+  local orng = Slider(f, "Objective Fade Distance", 14, -540, 130, 20, 500, 10,
+    function() return ns.db.mk_objRange end, function(v) ns.db.mk_objRange = v; ns.MarkersStyle() end,
+    function(v) return format("%d yd", v) end, true)
+  Tip(orng, "Objective Fade Distance", "Quest objective icons get smaller and more transparent the farther away they are. This is the distance at which they are smallest and faintest. Lower it to fade them sooner; raise it to keep them strong for longer. The focused quest's large marker never fades.")
+  local gr = Slider(f, "Giver Fade Distance", 14, -588, 130, 20, 500, 10,
     function() return ns.db.mk_giverRange end, function(v) ns.db.mk_giverRange = v; ns.MarkersStyle() end,
     function(v) return format("%d yd", v) end, true)
   Tip(gr, "Giver Fade Distance", "Quest giver icons are the least urgent, so they get smaller and more transparent the farther away they are. This is the distance at which they are smallest and faintest. Lower it to fade them sooner; raise it to keep them strong for longer.")
-  Button(f, "Open Settings", 14, -600, 224, function()
+  Button(f, "Open Settings", 14, -648, 224, function()
     f:Hide()
     if ns.categoryID then Settings.OpenToCategory(ns.categoryID) end
   end)

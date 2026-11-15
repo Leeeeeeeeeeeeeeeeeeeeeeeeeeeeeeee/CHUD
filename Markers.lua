@@ -25,8 +25,10 @@ local atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
 
 local MAX_ICONS = 24
 local FOCUS_SCALE = 1.3   -- the focused (primary) icon is this much larger than a normal one, but never taller than the bar
-local GIVER_SHRINK = 0.30  -- a quest giver at its fade distance is this much smaller than normal ...
-local GIVER_FADE = 0.50    -- ... and this much more transparent (both ease in with distance)
+local FADE_SHRINK = 0.30  -- a quest giver or objective at its fade distance is this much smaller than normal ...
+local FADE_ALPHA = 0.50    -- ... and this much more transparent (both ease in with distance)
+-- Which setting holds the fade distance for each kind, and its default (yards).
+local FADE_RANGE = { giver = { "mk_giverRange", 80 }, objective = { "mk_objRange", 100 } }
 local FAR_SCALE = 0.6     -- an icon at its maximum range is this fraction of normal size (when Smaller When Far is on)
 local TICK = 0.25       -- seconds between bearing updates
 local REFRESH = 2.0     -- seconds between full re-queries (events also trigger one)
@@ -599,7 +601,6 @@ function ns.LayoutMarkers(b, ppd, half, fade, fadeZone)
   local depth = db.mk_depth ~= false
   local outside = db.mk_outside
   local dir = outside and OutsideDir() or 0   -- +1 above the bar, -1 below it
-  local giverRange = max(db.mk_giverRange or 80, 1)
   local shown = 0
   for i = 1, #active do
     local t = active[i]
@@ -607,10 +608,11 @@ function ns.LayoutMarkers(b, ppd, half, fade, fadeZone)
     local size, dim = base, 1
     if t.primary then
       size = min(base * FOCUS_SCALE, maxSize)
-    elseif t.kind == "giver" then
-      -- Quest givers are the least urgent icon: they shrink and fade the farther away they are.
-      local f = min(t.dist / giverRange, 1)
-      size, dim = base * (1 - GIVER_SHRINK * f), 1 - GIVER_FADE * f
+    elseif FADE_RANGE[t.kind] then
+      -- Quest givers and objectives shrink and fade the farther away they are; each has its own distance.
+      local spec = FADE_RANGE[t.kind]
+      local f = min(t.dist / max(db[spec[1]] or spec[2], 1), 1)
+      size, dim = base * (1 - FADE_SHRINK * f), 1 - FADE_ALPHA * f
     elseif depth and t.limit and t.limit > 0 then
       -- Farther icons are smaller, down to FAR_SCALE of normal at the edge of their range.
       size = max(6, base * (1 - (1 - FAR_SCALE) * min(t.dist / t.limit, 1)))

@@ -5,18 +5,21 @@ with themes, an XP fill built into the bar, fading hairline edges, and optional 
 
 ## Install
 
-Download `CHUD-0.3.0.zip` from the Releases page and extract it into
-`World of Warcraft\_forever_\Interface\AddOns\` so the path ends in `AddOns\CHUD\CHUD.toc`.
+Download CHUD-0.3.0.zip.
+
+* Extract it into World of Warcraft\_forever_\Interface\AddOns\. The path should end in AddOns\CHUD\CHUD.toc. Windows’ “Extract All” often creates an extra nested folder, which breaks the addon, so check that CHUD.toc sits directly inside CHUD.
+* Fully restart the game. The new addon probably doesn’t appear with /reload.
+* On the character select screen, open AddOns and confirm CHUD is enabled.
+* In game, type /chud for settings or right-click the bar for the quick menu.
 
 ## Use
 
 - `/chud` opens settings.
 - Right-click the bar for the quick menu (markers, unlock, center).
-- `/chud xpdemo` fills the XP bar from 0 to 100% over 10 seconds for testing themes.
 
 ## Status
 
-Beta. The marker features depend on map and quest APIs that have not been fully verified on Forever.
+Beta. The marker features depend on map and quest APIs that have not been fully tested on Forever. I was able to get some things partially working but I need feedback going forward.
 
 ## License
 

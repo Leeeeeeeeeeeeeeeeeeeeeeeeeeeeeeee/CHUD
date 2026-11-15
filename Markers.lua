@@ -818,7 +818,7 @@ ev:SetScript("OnUpdate", ns.Perf("Markers", function(_, elapsed)
   acc = acc + elapsed; accRefresh = accRefresh + elapsed; accFast = accFast + elapsed
   if acc < TICK then
     -- Between full ticks: keep close-up icons smooth, at the chosen rate.
-    if accFast >= 1 / max(ns.db.mk_rate or 30, 1) then accFast = 0; FastTick() end
+    if accFast >= 1 / max(ns.db.mk_rate or 12, 1) then accFast = 0; FastTick() end
     return
   end
   acc, accFast = 0, 0

@@ -1,0 +1,13 @@
+## Interface: 16001
+## Title: CHUD (Compass HUD)
+## Notes: Rotating compass bar with themes, an XP fill, and quest/rare/gathering markers. /chud opens settings.
+## Author: skullfurious
+## X-License: MIT
+## IconTexture: Interface\AddOns\CHUD\icon.tga
+## Version: 0.3.0
+## SavedVariables: CHUDDB
+
+CHUD.lua
+Themes.lua
+Markers.lua
+Settings.lua

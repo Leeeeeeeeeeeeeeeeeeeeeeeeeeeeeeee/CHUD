@@ -78,7 +78,7 @@ end
 -- Built-in themes (cannot be deleted). Default is empty: it is the faction-aware defaults.
 ns.BuiltinNames = { "Default", "Dark", "High Contrast", "Assassins", "Alliance", "Horde", "UNSC", "Nordic", "Azeroth", "Pink",
   "Tactical", "Tactical Minimal", "Frost", "Frost Minimal", "Ember", "Ember Minimal",
-  "Daylight", "Catppuccin", "Tokyo Night" }
+  "Catppuccin", "Tokyo Night" }
 
 -- Fonts that ship with the game, so themes can use them without any other addon.
 local ARIAL    = { fontName = "Arial Narrow",  fontPath = "Fonts\\ARIALN.TTF" }
@@ -155,7 +155,8 @@ BUILTIN["Tokyo Night"] = Theme({ bg = { 0.102, 0.106, 0.149 }, accent = { 0.478,
   text = { 0.753, 0.792, 0.961 }, north = { 0.969, 0.463, 0.557 }, xp = { 0.733, 0.604, 0.969 } },
   { fadeAmount = 0.50, showDegrees = true, outlineWidth = 1, outlineColor = { 0.04, 0.04, 0.08, 1 } })
 
--- Daylight: the colors follow the game's clock, in half-hour steps. Each keyframe is { hour, bg, accent, text,
+-- Daylight is a toggle, not a theme: while it is on, the colors follow the game's clock in half-hour steps and the color
+-- controls are locked. Turning it off puts back the colors the player had. Each keyframe is { hour, bg, accent, text,
 -- north, xp }; the half-hour in between is blended from its two neighbours.
 local DAY = {
   { 0.0,  { 0.03, 0.04, 0.10 }, { 0.55, 0.62, 0.95 }, { 0.80, 0.84, 0.95 }, { 0.95, 0.55, 0.60 }, { 0.35, 0.40, 0.85 } },  -- midnight
@@ -179,17 +180,41 @@ local function DayBucket()
   end
   return h * 2 + (m >= 30 and 1 or 0)
 end
-local function DaylightTheme(bucket)
+local function DaylightPalette(bucket)
   local t = bucket / 2
   local a, b = DAY[1], DAY[#DAY]
   for i = 1, #DAY - 1 do
     if t >= DAY[i][1] and t <= DAY[i + 1][1] then a, b = DAY[i], DAY[i + 1]; break end
   end
   local f = (t - a[1]) / max(b[1] - a[1], 0.001)
-  return Theme({ bg = Mix(a[2], b[2], f), accent = Mix(a[3], b[3], f), text = Mix(a[4], b[4], f),
-    north = Mix(a[5], b[5], f), xp = Mix(a[6], b[6], f) }, { outlineWidth = 1 })
+  return Palette({ bg = Mix(a[2], b[2], f), accent = Mix(a[3], b[3], f), text = Mix(a[4], b[4], f),
+    north = Mix(a[5], b[5], f), xp = Mix(a[6], b[6], f) })
 end
-BUILTIN.Daylight = DaylightTheme(DayBucket())
+
+-- Daylight changes colors only. Icon color (mk_color) is left alone: it has its own control in the marker menu.
+local function ApplyDaylightColors()
+  local bucket = DayBucket()
+  for k, v in pairs(DaylightPalette(bucket)) do
+    if k ~= "mk_color" then ns.db[k] = v end
+  end
+  ns.db.dayBucket = bucket
+end
+
+function ns.DaylightOn() return ns.db and ns.db.daylight == true end
+function ns.SetDaylight(on)
+  local db = ns.db
+  if on and not db.daylight then
+    local keep = {}
+    for _, k in ipairs(ns.COLOR_KEYS) do keep[k] = ns.Copy(db[k]) end
+    db.preDaylight, db.daylight = keep, true
+    ApplyDaylightColors()
+  elseif not on and db.daylight then
+    for k, v in pairs(db.preDaylight or {}) do db[k] = ns.Copy(v) end
+    db.preDaylight, db.daylight, db.dayBucket = nil, nil, nil
+  end
+  ns.Apply()
+  if ns.RefreshSettings then ns.RefreshSettings() end
+end
 
 local function Equal(a, b)
   if type(a) == "table" and type(b) == "table" then
@@ -207,7 +232,6 @@ function ns.IsBuiltin(name) return BUILTIN[name] ~= nil end
 -- Full key set for a theme. Missing keys fall back to defaults, so themes saved by an older
 -- version still work after new settings are added.
 function ns.GetThemeData(name)
-  if name == "Daylight" then BUILTIN.Daylight = DaylightTheme(DayBucket()) end   -- always the current half-hour
   local src = BUILTIN[name] or (ns.db.themes and ns.db.themes[name])
   if not src then return nil end
   local data = {}
@@ -248,7 +272,7 @@ function ns.ApplyTheme(name)
   local data = ns.GetThemeData(name)
   if not data then return end
   for _, k in ipairs(KEYS) do ns.db[k] = data[k] end
-  ns.db.dynTheme = (name == "Daylight") and DayBucket() or nil   -- remember which half-hour is applied
+  ns.db.daylight, ns.db.preDaylight, ns.db.dayBucket = nil, nil, nil   -- a theme sets every color itself, so Daylight turns off
   ns.Apply()
   if ns.RefreshSettings then ns.RefreshSettings() end
 end
@@ -265,29 +289,19 @@ function ns.DeleteTheme(name)
   if ns.OnSettingsChanged then ns.OnSettingsChanged() end
 end
 
--- Keeps Daylight in step with the game clock: every 30 real seconds, if the half-hour has changed, the new colors are
--- applied, but only while the settings still equal the Daylight look that was applied. Once the player changes anything
--- (or picks another theme) the theme stops following the clock, so it never overwrites their edits.
-local dayAcc = 0
+-- Keeps Daylight in step with the game clock: when the half-hour has changed, the new colors are applied. The first check
+-- runs right away (so login catches up), then one every 30 real seconds.
+local dayAcc = 30
 local dayFrame = CreateFrame("Frame")
 dayFrame:SetScript("OnUpdate", function(_, elapsed)
   dayAcc = dayAcc + elapsed
   if dayAcc < 30 then return end
-  dayAcc = 0
   local db = ns.db
-  if not db or not db.dynTheme then return end
-  local now = DayBucket()
-  if now == db.dynTheme then return end
-  local applied = DaylightTheme(db.dynTheme)   -- what was applied; missing keys fall back to the defaults
-  local same = true
-  for _, k in ipairs(KEYS) do
-    local v = applied[k]
-    if v == nil then v = ns.defaults[k] end
-    if not Equal(db[k], v) then same = false; break end
-  end
-  if same then
-    ns.ApplyTheme("Daylight")
-  else
-    db.dynTheme = nil
+  if not db then return end
+  dayAcc = 0
+  if db.daylight and db.dayBucket ~= DayBucket() then
+    ApplyDaylightColors()
+    ns.Apply()
+    if ns.RefreshSettings then ns.RefreshSettings() end
   end
 end)

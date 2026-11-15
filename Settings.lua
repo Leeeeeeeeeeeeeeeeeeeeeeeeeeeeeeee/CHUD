@@ -35,6 +35,8 @@ local function Check(parent, text, x, y, get, set)
   b:SetHighlightTexture("Interface\\Buttons\\UI-CheckBox-Highlight", "ADD")
   local fs = b:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
   fs:SetPoint("LEFT", b, "RIGHT", 6, 0); fs:SetText(text)
+  b.label = fs
+  b:SetHitRectInsets(0, -(fs:GetStringWidth() + 6), 0, 0)   -- hovering or clicking the label counts too
   b:SetScript("OnClick", function(self) set(self:GetChecked() and true or false); Refresh() end)
   refreshers[#refreshers + 1] = function() b:SetChecked(get()) end
   b.Dim = function(off)   -- grey out and block clicks (used for options that need something else enabled)
@@ -172,9 +174,15 @@ local function ColorRow(parent, text, key, x, y)
     })
   end)
   refreshers[#refreshers + 1] = function() local c = ns.db[key]; tex:SetColorTexture(c[1], c[2], c[3], 1) end
-  Slider(parent, nil, x + 144, y - 4, 44, 0, 1, 0.05,
+  local op = Slider(parent, nil, x + 144, y - 4, 44, 0, 1, 0.05,
     function() return ns.db[key][4] end,
     function(v) ns.db[key][4] = v; ns.Apply() end, Pct, false)
+  sw.Dim = function(off)   -- locked while Daylight controls the colors
+    sw:SetEnabled(not off); sw:SetAlpha(off and 0.4 or 1)
+    local v = off and 0.45 or 1
+    fs:SetTextColor(v, v, v)
+    op.Dim(off)
+  end
   return sw
 end
 
@@ -548,10 +556,10 @@ local function BuildMarkerMenu()
     function() return ns.db.mk_giverRange end, function(v) ns.db.mk_giverRange = v; ns.MarkersStyle() end,
     function(v) return format("%d yd", v) end, true)
   Tip(gr, "Giver Fade Distance", "Quest giver icons are the least urgent, so they get smaller and more transparent the farther away they are. This is the distance at which they are smallest and faintest. Lower it to fade them sooner; raise it to keep them strong for longer.")
-  Button(f, "Open Settings", 14, -648, 224, function()
+  Tip(Button(f, "Open Settings", 14, -648, 224, function()
     f:Hide()
     if ns.categoryID then Settings.OpenToCategory(ns.categoryID) end
-  end)
+  end), "Open Settings", "Closes this menu and opens CHUD's main settings page: size, fonts, colors, themes and the experience bar.")
 
   -- Right column: display options and icon style. Style settings are saved with themes.
   local X = 262
@@ -573,8 +581,10 @@ local function BuildMarkerMenu()
     function(v) ns.db.locked = not v; ns.Apply() end)
   unlock:SetHitRectInsets(0, -190, 0, 0)
   Tip(unlock, "Unlock (Drag To Move)", "Lets you drag CHUD to a new position with the left mouse button. The same as /chud unlock and /chud lock. Untick it to lock the position again.")
-  Button(f, "Center", X, -138, 108, function() ns.CenterHorizontal() end)
-  Button(f, "Reset Position", X + 116, -138, 108, function() ns.ResetPosition() end)
+  Tip(Button(f, "Center", X, -138, 108, function() ns.CenterHorizontal() end),
+    "Center", "Moves the bar to the horizontal middle of the screen and keeps its height.")
+  Tip(Button(f, "Reset Position", X + 116, -138, 108, function() ns.ResetPosition() end),
+    "Reset Position", "Puts the bar back at its default spot. Nothing else is changed.")
   local rg = Slider(f, "Max Distance", X, -174, 130, 100, 1500, 50,
     function() return ns.db.mk_range end, function(v) ns.db.mk_range = v; ns.MarkersChanged() end,
     function(v) return format("%d yd", v) end, true)
@@ -625,16 +635,17 @@ function ns.BuildSettings()
   local function bind(key) return function() return db[key] end, function(v) db[key] = v; ns.Apply() end end
 
   Label(panel, "CHUD Settings", 16, -14, "GameFontNormalHuge")
-  Label(panel, "/chud [unlock | lock | center | resetpos | resetcolors | resetbehavior | reset]",
+  local cmds = Label(panel, "/chud [unlock | lock | center | resetpos | resetcolors | resetbehavior | reset]",
     16, -44, "GameFontHighlightSmall")
+  cmds:SetWidth(380)
 
   -- Theme row: dropdown + Save + Delete -------------------------------------------------
   Label(panel, "Theme", 236, -17, "GameFontNormal")
   local themeBtn, themePopup, themeUpdate
   local saveBtn, delBtn
-  local function tip(btn, title, body)
+  local function tip(btn, title, body, anchor)
     btn:SetScript("OnEnter", function(self)
-      GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+      GameTooltip:SetOwner(self, anchor or "ANCHOR_BOTTOM")
       GameTooltip:SetText(title, 1, 1, 1)
       GameTooltip:AddLine(body, 0.8, 0.8, 0.8, true)
       GameTooltip:Show()
@@ -642,7 +653,7 @@ function ns.BuildSettings()
     btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
   end
   themeBtn, themePopup, themeUpdate = ListDropdown(panel, 290, -12, 150,
-    function() return ns.MatchTheme() or "Custom (Unsaved)" end,
+    function() if ns.DaylightOn() then return "Daylight (Auto Colors)" end return ns.MatchTheme() or "Custom (Unsaved)" end,
     function()
       local match = ns.MatchTheme()
       local items = { { text = "Built-In", header = true } }
@@ -675,7 +686,7 @@ function ns.BuildSettings()
       end,
     })
   end)
-  tip(saveBtn, "Save Theme", "Saves the current look as a new theme. Disabled while your settings already match a theme.")
+  tip(saveBtn, "Save Theme", "Saves the current look as a new theme. Disabled while your settings already match a theme, and while Daylight is on (its colors change with the clock).")
 
   delBtn = Button(panel, "Delete", 512, -12, 66, function()
     local name = ns.MatchTheme()
@@ -690,11 +701,25 @@ function ns.BuildSettings()
   local function themeRefresh()
     themeUpdate()
     local match = ns.MatchTheme()
-    if match then saveBtn:Disable() else saveBtn:Enable() end
+    if match or ns.DaylightOn() then saveBtn:Disable() else saveBtn:Enable() end
     if match and not ns.IsBuiltin(match) then delBtn:Enable() else delBtn:Disable() end
   end
   refreshers[#refreshers + 1] = themeRefresh
   ns.OnSettingsChanged = themeRefresh
+
+  -- Daylight: colors follow the game's clock; every color control is locked while it is on.
+  local colorRows = {}
+  local dayChk
+  dayChk = Check(panel, "Daylight: Auto Colors", 420, -46, function() return ns.DaylightOn() end,
+    function(v) ns.SetDaylight(v) end)
+  dayChk:SetHitRectInsets(0, -200, 0, 0)
+  tip(dayChk, "Daylight: Auto Colors", "Colors follow the game's clock, changing every half hour: pale blue noon, warm golden hour, purple dusk, deep blue night. While it is on, every color control is greyed out and the theme list shows Daylight. Layout, fonts and icons are unaffected. Untick it to get your previous colors back. Picking a theme also turns it off.", "ANCHOR_BOTTOM")
+  refreshers[#refreshers + 1] = function()
+    dayChk.label:SetText(ns.DaylightOn() and "Daylight On: Colors Locked" or "Daylight: Auto Colors")
+    local on = ns.DaylightOn()
+    for _, r in ipairs(colorRows) do r.Dim(on) end
+    dayChk.label:SetTextColor(on and 1 or 1, on and 0.82 or 1, on and 0.2 or 1)
+  end
 
   -- The settings canvas is ~650 units wide and ~610 tall; columns are sized to fit, with the
   -- vertical space spread out so nothing feels compressed.
@@ -724,21 +749,23 @@ function ns.BuildSettings()
   local bx = 228
   Header(panel, "Display", bx, -72, 170)
   y = -108
-  local function C(text, key)
-    local g, set = bind(key); Check(panel, text, bx, y, g, set); y = y - ROW
+  local function C(text, key, tipText)
+    local g, set = bind(key); local b = Check(panel, text, bx, y, g, set); y = y - ROW
+    tip(b, text, tipText, "ANCHOR_RIGHT")
+    return b
   end
-  C("Show Degree Readout", "showDegrees")
-  C("Degrees Inside Bar", "degreeInline")
-  C("Show NE/SE/SW/NW", "showIntercardinals")
-  C("Show Tick Marks", "showTicks")
-  C("Show Number Labels", "showNumbers")
-  C("Flip Ticks / Letters", "flipTicks")
-  C("Fade Edges (Bar + BG)", "fadeEdges")
-  C("Edge Hairlines", "edgeLines")
-  C("Glitch Effect In Dungeons", "glitchFx")
-  C("Low-CPU Rendering", "optimize")
+  C("Show Degree Readout", "showDegrees", "Shows your heading as a number of degrees (0 to 359, 0 = north) at the center of the bar.")
+  C("Degrees Inside Bar", "degreeInline", "Draws the degree readout inside the bar and shifts the letters to make room. Only matters while Show Degree Readout is on.")
+  C("Show NE/SE/SW/NW", "showIntercardinals", "Shows the diagonal letters between N, E, S and W. Turn off for a cleaner bar.")
+  C("Show Tick Marks", "showTicks", "Draws the small marks along the bar that show degrees between the letters.")
+  C("Show Number Labels", "showNumbers", "Adds degree numbers (30, 60, 120 and so on) between the letters.")
+  C("Flip Ticks / Letters", "flipTicks", "Swaps the sides: letters below and ticks above. Marker icons inside the bar move to the opposite edge too.")
+  C("Fade Edges (Bar + BG)", "fadeEdges", "Fades the letters, ticks and icons out toward the left and right ends of the bar. Edge Fade Amount sets how far in the fade reaches.")
+  C("Edge Hairlines", "edgeLines", "Draws thin lines along the top and bottom edges of the bar, in the Edge Lines color.")
+  C("Glitch Effect In Dungeons", "glitchFx", "Plays a short glitch animation when the compass becomes unavailable or comes back. The game withholds your facing inside some instances, so the bar shows a notice there.")
+  C("Low-CPU Rendering", "optimize", "Only redraws the bar when your heading or a marker actually changes, instead of every frame. Leave it on unless you see something not updating.")
   -- Turning the right-click menu off needs a confirmation: unlocking the bar and every marker option live there.
-  Check(panel, "Right-Click Menu", bx, y, function() return db.rightClickMenu ~= false end,
+  local rcm = Check(panel, "Right-Click Menu", bx, y, function() return db.rightClickMenu ~= false end,
     function(v)
       if v then db.rightClickMenu = true; return end
       ShowDialog({
@@ -747,18 +774,20 @@ function ns.BuildSettings()
         onYes = function() db.rightClickMenu = false; Refresh() end,
       })
     end)   -- cancelling leaves the setting unchanged, and the Refresh after this click re-ticks the box
+  tip(rcm, "Right-Click Menu", "Right-clicking the bar opens the marker menu: unlock and center the bar and every quest, rare, treasure and gathering option. Turning it off asks for confirmation. /chud menu still opens it.", "ANCHOR_RIGHT")
   y = y - ROW
 
   -- Everything about the XP fill in one place.
   Header(panel, "Experience Bar", bx, y - 12, 170)
   y = y - 48
-  C("XP Bar + Hover Tooltip", "xpBar")
-  Check(panel, "XP Bar Pulse On Gain", bx, y, function() return db.xpPulse end,
+  C("XP Bar + Hover Tooltip", "xpBar", "Fills the bar with your experience progress toward the next level. Hover the bar to see the numbers.")
+  local pulse = Check(panel, "XP Bar Pulse On Gain", bx, y, function() return db.xpPulse end,
     function(v) db.xpPulse = v; ns.Apply(); if v then ns.PreviewXPPulse() end end)   -- plays once so you can see it
+  tip(pulse, "XP Bar Pulse On Gain", "Briefly brightens the XP fill whenever you gain experience. Ticking it plays the pulse once as a preview.", "ANCHOR_RIGHT")
   y = y - ROW - 6
   -- Style and direction have several states, so each is one button that cycles (a checkbox group
   -- would let you tick two or none).
-  local function Cycler(list, key, x, yy)
+  local function Cycler(list, key, x, yy, title, body)
     local btn = Button(panel, "", x, yy, 170, function()
       local cur = 1
       for i, f in ipairs(list) do if f[1] == db[key] then cur = i end end
@@ -770,26 +799,28 @@ function ns.BuildSettings()
       for _, f in ipairs(list) do if f[1] == db[key] then label = f[2] end end
       btn:SetText(label)
     end
+    tip(btn, title, body .. " Click to switch to the next option.", "ANCHOR_RIGHT")
     return btn
   end
   Cycler({ { "fadeCenter", "Style: Fade From Center" }, { "fadeBottom", "Style: Fade From Bottom" }, { "fadeTop", "Style: Fade From Top" },
     { "band", "Style: Short Band" }, { "full", "Style: Full Height" } },
-    "xpFillStyle", bx, y)
+    "xpFillStyle", bx, y, "XP Fill Style", "How the XP color is shaded vertically: fading from the center, bottom or top, as a short band, or filling the full height. XP Fill Strength sets how strong it is.")
   y = y - 32   -- 24 px button + 8 px gap
   Cycler({ { "left", "Fill: Left To Right" }, { "edges", "Fill: From Both Edges" }, { "center", "Fill: From Center" },
     { "up", "Fill: Bottom To Top" }, { "down", "Fill: Top To Bottom" } },
-    "xpFillMode", bx, y)
+    "xpFillMode", bx, y, "XP Fill Direction", "Which way the XP fill grows as you gain experience: left to right, from both edges, from the center, bottom to top or top to bottom.")
 
   -- Column C: colors -------------------------------------------------------------
   local cx = 412
   Header(panel, "Background", cx, -72, 232)
-  Check(panel, "Solid", cx, -108, function() return db.bgMode == "solid" end,
-    function() db.bgMode = "solid"; ns.Apply() end)
-  Check(panel, "Gradient", cx + 84, -108, function() return db.bgMode == "gradient" end,
-    function() db.bgMode = "gradient"; ns.Apply() end)
-  ColorRow(panel, "Solid Color", "bgSolid", cx, -108 - ROW)
-  ColorRow(panel, "Gradient Center", "bgCenter", cx, -108 - 2 * ROW)
-  ColorRow(panel, "Gradient Edge", "bgEdge", cx, -108 - 3 * ROW)
+  tip(Check(panel, "Solid", cx, -108, function() return db.bgMode == "solid" end,
+    function() db.bgMode = "solid"; ns.Apply() end), "Solid Background", "A flat plate behind the bar, in the Solid Color.", "ANCHOR_RIGHT")
+  tip(Check(panel, "Gradient", cx + 84, -108, function() return db.bgMode == "gradient" end,
+    function() db.bgMode = "gradient"; ns.Apply() end), "Gradient Background", "A background that is strongest in the middle and fades out toward the ends, using the Gradient Center and Gradient Edge colors.", "ANCHOR_RIGHT")
+  local function CRow(...) local r = ColorRow(...); colorRows[#colorRows + 1] = r; return r end
+  CRow(panel, "Solid Color", "bgSolid", cx, -108 - ROW)
+  CRow(panel, "Gradient Center", "bgCenter", cx, -108 - 2 * ROW)
+  CRow(panel, "Gradient Edge", "bgEdge", cx, -108 - 3 * ROW)
 
   y = -108 - 3 * ROW - 28
   Header(panel, "Elements", cx, y, 232)
@@ -799,27 +830,31 @@ function ns.BuildSettings()
     { "Tick Marks", "tickColor" }, { "Center Marker", "markerColor" }, { "Degree Readout", "degreeColor" },
     { "Text Outline", "outlineColor" },
   }) do
-    ColorRow(panel, r[1], r[2], cx, y); y = y - ROW
+    CRow(panel, r[1], r[2], cx, y); y = y - ROW
   end
 
   -- Marker style: two checkboxes that act as a pair (one is always on).
-  Check(panel, "Marker: Short", cx, y, function() return db.markerStyle ~= "notch" end,
-    function() db.markerStyle = "short"; ns.Apply() end)
-  Check(panel, "Marker: Notch", cx + 116, y, function() return db.markerStyle == "notch" end,
-    function() db.markerStyle = "notch"; ns.Apply() end)
+  tip(Check(panel, "Marker: Short", cx, y, function() return db.markerStyle ~= "notch" end,
+    function() db.markerStyle = "short"; ns.Apply() end), "Short Marker", "The center marker is a short vertical line.", "ANCHOR_RIGHT")
+  tip(Check(panel, "Marker: Notch", cx + 116, y, function() return db.markerStyle == "notch" end,
+    function() db.markerStyle = "notch"; ns.Apply() end), "Notch Marker", "The center marker is a small notch at the edge of the bar.", "ANCHOR_RIGHT")
   y = y - ROW - 4
 
   Header(panel, "XP & Edge Colors", cx, y, 232)
   y = y - 36
-  ColorRow(panel, "XP Bar", "xpColor", cx, y)
-  ColorRow(panel, "Edge Lines", "edgeColor", cx, y - ROW)
+  CRow(panel, "XP Bar", "xpColor", cx, y)
+  CRow(panel, "Edge Lines", "edgeColor", cx, y - ROW)
 
   -- Bottom bar: resets -------------------------------------------------------------
   local rule = panel:CreateTexture(nil, "ARTWORK")
   rule:SetPoint("TOPLEFT", 16, -556); rule:SetSize(628, 1); rule:SetColorTexture(unpack(RULE))
-  Button(panel, "Reset Colors", 16, -570, 120, function() ns.ResetColors() end)
-  Button(panel, "Reset Layout/Behavior", 142, -570, 160, function() ns.ResetBehavior() end)
-  Button(panel, "Reset All Settings", 308, -570, 130, function() ns.Reset() end)
+  local resetColors = Button(panel, "Reset Colors", 16, -570, 120, function() ns.ResetColors() end)
+  tip(resetColors, "Reset Colors", "Puts every color and the background opacity back to the defaults for your faction. Layout, fonts and markers are untouched. Disabled while Daylight is on.", "ANCHOR_TOP")
+  refreshers[#refreshers + 1] = function() if ns.DaylightOn() then resetColors:Disable() else resetColors:Enable() end end
+  tip(Button(panel, "Reset Layout/Behavior", 142, -570, 160, function() ns.ResetBehavior() end),
+    "Reset Layout/Behavior", "Puts size, fonts, toggles, XP bar options and icon style back to the defaults. Colors and position are untouched.", "ANCHOR_TOP")
+  tip(Button(panel, "Reset All Settings", 308, -570, 130, function() ns.Reset() end),
+    "Reset All Settings", "Puts every CHUD setting back to the defaults, including Daylight and marker options. Your saved themes and recorded gathering spots are kept.", "ANCHOR_TOP")
   local xpBtn
   xpBtn = Button(panel, "", 444, -570, 190, function()
     if not ns.BlizzXPFound() then print("|cffd9bf4dCHUD:|r could not find the default XP bar on this client."); return end
@@ -828,6 +863,7 @@ function ns.BuildSettings()
     Refresh()
   end)
   refreshers[#refreshers + 1] = function() xpBtn:SetText("Default XP Bar: " .. (ns.db.hideBlizzXP and "Hidden" or "Shown")) end
+  tip(xpBtn, "Default XP Bar", "Shows or hides the game's own experience bar at the bottom of the screen. Useful with CHUD's XP fill so the same information is not shown twice.", "ANCHOR_TOP")
 
   panel:SetScript("OnShow", Refresh)
   panel:SetScript("OnHide", function()

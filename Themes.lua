@@ -345,7 +345,7 @@ end
 
 -- /chud themedemo: shows every built-in theme in turn, THEME_SECONDS each, with its name under the bar, for recording a
 -- GIF. It loops until you run the command again, which puts everything back (including Daylight if it was on).
-local THEME_SECONDS = 2
+local THEME_SECONDS = 1.6
 local tdemo = CreateFrame("Frame")
 tdemo:Hide()
 local tdSaved, tdT, tdIndex

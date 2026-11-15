@@ -332,12 +332,33 @@ end
 
 -- Bearing update (every TICK seconds) --------------------------------------------------------
 
+-- A target's position on the player's map: its own when it is on that map, else moved through world
+-- coordinates (cached per player map).
+local function TargetXY(t, pm)
+  if t.mapID == pm then return t.x, t.y end
+  if t.cmap ~= pm or t.cfrom ~= t.mapID then
+    t.cmap, t.cfrom, t.cx, t.cy = pm, t.mapID, nil, nil
+    local cont, wp = Try(C_Map.GetWorldPosFromMapPos, t.mapID, CreateVector2D(t.x, t.y))
+    if cont and wp then
+      t.cx, t.cy = XY(Try(C_Map.GetMapPosFromWorldPos, cont, wp, pm))
+    end
+  end
+  return t.cx, t.cy
+end
+
+-- Distance (yards) and compass bearing (degrees) from the player to a point on the same map.
+local function Aim(tx, ty, px, py, w, h)
+  local east, north = (tx - px) * w, -(ty - py) * h   -- map y grows southward
+  return sqrt(east * east + north * north), (deg(atan2(east, north))) % 360
+end
+
 local function SortFn(a, b)
   if a.primary ~= b.primary then return a.primary end
   return a.dist < b.dist
 end
 
 local lastCount, tickNo = 0, 0
+local lastPX, lastPY   -- the player's map position at the last full Tick or FastTick (FastTick skips when it is unchanged)
 local best = {}   -- nearest candidate per group, rebuilt every tick
 local function Tick()
   local changed = false   -- did anything visible move since the last redraw?
@@ -349,31 +370,17 @@ local function Tick()
     local px, py = XY(pm and Try(C_Map.GetPlayerMapPosition, pm, "player"))
     local w, h = Try(C_Map.GetMapWorldSize, pm)
     if px and Num(w) and Num(h) and w > 0 and h > 0 then
+      lastPX, lastPY = px, py
       local range, qRange = db.mk_range or 500, db.mk_qRange or 100
       wipe(best)
       for i = 1, #targets do
         local t = targets[i]
-        local tx, ty
-        if t.mapID == pm then
-          tx, ty = t.x, t.y
-        else
-          -- Another map: go through world coordinates onto the player's map (cached per player map).
-          if t.cmap ~= pm or t.cfrom ~= t.mapID then
-            t.cmap, t.cfrom, t.cx, t.cy = pm, t.mapID, nil, nil
-            local cont, wp = Try(C_Map.GetWorldPosFromMapPos, t.mapID, CreateVector2D(t.x, t.y))
-            if cont and wp then
-              t.cx, t.cy = XY(Try(C_Map.GetMapPosFromWorldPos, cont, wp, pm))
-            end
-          end
-          tx, ty = t.cx, t.cy
-        end
+        local tx, ty = TargetXY(t, pm)
         if tx then
-          local east, north = (tx - px) * w, -(ty - py) * h   -- map y grows southward
-          local dist = sqrt(east * east + north * north)
+          local dist, bearing = Aim(tx, ty, px, py, w, h)
           local limit = (t.src == "questie") and qRange or range
           if t.primary or dist <= limit then
-            t.dist, t.limit = dist, limit
-            t.bearing = (deg(atan2(east, north))) % 360
+            t.dist, t.limit, t.bearing = dist, limit, bearing
             local g = t.group
             if g then
               local cur = best[g]
@@ -572,7 +579,9 @@ local function OutsideDir()
   return -1
 end
 
+local lastB, lastPpd, lastHalf, lastFade, lastZone   -- the compass's latest layout, so icons can be re-placed alone
 function ns.LayoutMarkers(b, ppd, half, fade, fadeZone)
+  lastB, lastPpd, lastHalf, lastFade, lastZone = b, ppd, half, fade, fadeZone
   local db = ns.db
   local base = db.mk_size or 16
   local maxSize = max(base, db.height - 2)   -- the focused icon never makes the bar taller
@@ -656,6 +665,37 @@ end
 
 ns.LayoutMarkers = ns.Perf("LayoutMarkers", ns.LayoutMarkers)
 
+-- Smooth movement for close-up icons ---------------------------------------------------------------
+-- The full Tick (every TICK seconds) re-scans every target. A nearby icon swings quickly as you move, so
+-- at that rate it jumps. While you move and any shown icon is within NEAR yards, only the icons on the bar
+-- are re-aimed, at the rate the player chose (mk_rate), and only the icons are re-placed, not the whole
+-- compass. Standing still costs nothing: the player's position is unchanged, so it returns at once.
+local NEAR = 150
+local function FastTick()
+  if not lastB or #active == 0 then return end
+  local near = false
+  for i = 1, #active do
+    if active[i].dist < NEAR then near = true; break end
+  end
+  if not near then return end
+  local pm = Try(C_Map.GetBestMapForUnit, "player")
+  local px, py = XY(pm and Try(C_Map.GetPlayerMapPosition, pm, "player"))
+  if not px or (px == lastPX and py == lastPY) then return end
+  lastPX, lastPY = px, py
+  local w, h = Try(C_Map.GetMapWorldSize, pm)
+  if not (Num(w) and Num(h) and w > 0 and h > 0) then return end
+  for i = 1, #active do
+    local t = active[i]
+    local tx, ty = TargetXY(t, pm)
+    if tx then
+      t.dist, t.bearing = Aim(tx, ty, px, py, w, h)
+      t.drawn, t.drawnD = t.bearing, floor(t.dist / 5)   -- keep Tick's change detection in step
+    end
+  end
+  ns.LayoutMarkers(lastB, lastPpd, lastHalf, lastFade, lastZone)
+end
+FastTick = ns.Perf("FastTick", FastTick)
+
 -- Gather recording ------------------------------------------------------------------------------
 -- The cast that starts a gather is matched by spell NAME (works across expansions and locales
 -- because the base spells' names are looked up from the game). When the cast succeeds, the
@@ -725,13 +765,17 @@ ev:SetScript("OnEvent", function(_, event, ...)
   end
 end)
 
-local acc, accRefresh = 0, 0
+local acc, accRefresh, accFast = 0, 0, 0
 ev:SetScript("OnUpdate", ns.Perf("Markers", function(_, elapsed)
   if not ns.db then return end
   if not next(gatherKind) then BuildGatherNames() end
-  acc = acc + elapsed; accRefresh = accRefresh + elapsed
-  if acc < TICK then return end
-  acc = 0
+  acc = acc + elapsed; accRefresh = accRefresh + elapsed; accFast = accFast + elapsed
+  if acc < TICK then
+    -- Between full ticks: keep close-up icons smooth, at the chosen rate.
+    if accFast >= 1 / max(ns.db.mk_rate or 30, 1) then accFast = 0; FastTick() end
+    return
+  end
+  acc, accFast = 0, 0
   if needRebuild or accRefresh >= REFRESH then accRefresh = 0; Rebuild() end
   Tick()
 end))

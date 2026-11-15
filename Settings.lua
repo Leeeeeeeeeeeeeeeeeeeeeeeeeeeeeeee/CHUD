@@ -594,6 +594,10 @@ local function BuildMarkerMenu()
     "Icons shrink the farther away they are, down to about 60% of Icon Size at the edge of their range. The focused quest's icon is always the largest, and no icon makes the bar taller.")
   StyleCheck("Icons Outside Bar", "mk_outside", -513,
     "Puts the marker icons just outside the bar instead of inside its edge. They go below the bar when it is in the upper half of the screen and above it when it is in the lower half, so they never leave the screen.")
+  local rate = Slider(f, "Icon Update Rate", X, -566, 130, 4, 60, 2,
+    function() return ns.db.mk_rate end, function(v) ns.db.mk_rate = v end,
+    function(v) return format("%d /s", v) end, true)
+  Tip(rate, "Icon Update Rate", "How many times per second icons close to you are re-aimed while you move. Higher is smoother, lower uses a little less CPU. Icons farther than about 150 yards, and every icon while you stand still, cost nothing extra. 4 is the old, steppy behavior.")
   if ns.QuestAreaSupported and ns.QuestAreaSupported() then
     StyleCheck("Glow In Quest Area", "mk_areaGlow", -536,
       "The focused quest's icon pulses with a soft glow while you are inside that quest's area (the blue zone on the map).")

@@ -45,6 +45,7 @@ ns.defaults = {
   mk_qRange = 100,         -- yards: Questie icons farther than this are hidden (the focused quest ignores it)
   mk_qFocusOnly = false,   -- show Questie icons only for the focused quest
   mk_areaGlow = true,      -- the focused quest's icon glows while you are inside that quest's area (if the client reports it)
+  mk_rate = 30,            -- updates per second for close-up icons while you move (higher = smoother, a little more CPU)
   mk_giverRange = 80,      -- yards over which quest giver icons shrink and fade
   mk_outside = false,      -- icons sit just outside the bar instead of inside its edge
   mk_depth = true,         -- icons get smaller the farther away they are (the focused icon is always the largest)

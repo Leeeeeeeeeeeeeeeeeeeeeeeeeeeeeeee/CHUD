@@ -28,7 +28,7 @@ local FOCUS_SCALE = 1.3   -- the focused (primary) icon is this much larger than
 local FADE_SHRINK = 0.30  -- a quest giver or objective at its fade distance is this much smaller than normal ...
 local FADE_ALPHA = 0.50    -- ... and this much more transparent (both ease in with distance)
 -- Which setting holds the fade distance for each kind, and its default (yards).
-local FADE_RANGE = { giver = { "mk_giverRange", 80 }, objective = { "mk_objRange", 100 } }
+local FADE_RANGE = { giver = { "mk_giverRange", 300 }, objective = { "mk_objRange", 300 } }
 local FAR_SCALE = 0.6     -- an icon at its maximum range is this fraction of normal size (when Smaller When Far is on)
 local TICK = 0.25       -- seconds between bearing updates
 local REFRESH = 2.0     -- seconds between full re-queries (events also trigger one)

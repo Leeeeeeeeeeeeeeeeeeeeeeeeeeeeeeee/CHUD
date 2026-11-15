@@ -24,6 +24,8 @@ local deg = math.deg
 local atan2 = math.atan2 or function(y, x) return math.atan(y, x) end
 
 local MAX_ICONS = 24
+local FOCUS_SCALE = 1.3   -- the focused (primary) icon is this much larger than a normal one, but never taller than the bar
+local FAR_SCALE = 0.6     -- an icon at its maximum range is this fraction of normal size (when Smaller When Far is on)
 local TICK = 0.25       -- seconds between bearing updates
 local REFRESH = 2.0     -- seconds between full re-queries (events also trigger one)
 local MAX_NODES = 500   -- recorded spots kept per kind per map
@@ -394,6 +396,19 @@ local KIND_LABEL = {
   box = "Container (Saved Spot)",
 }
 
+-- Clicking a quest icon focuses that quest. Questie's own focus is used when Questie is present (it also
+-- fades its other icons); otherwise the game's super-tracked quest is set.
+local function Focusable(t)
+  return t and t.questID and not t.primary and (t.kind == "objective" or t.kind == "turnin")
+end
+local function FocusQuest(qid)
+  local TU = Q.utils
+  if type(TU) == "table" and TU.FocusQuest and Try(TU.FocusQuest, TU, qid) then needRebuild = true; return end
+  local ST = C_SuperTrack
+  if ST and ST.SetSuperTrackedQuestID then pcall(ST.SetSuperTrackedQuestID, qid) end
+  needRebuild = true
+end
+
 -- Hover tooltip for a marker: what it is, the quest's objectives, and how far away it is.
 local function ShowTip(ic)
   local t = ic.t
@@ -419,6 +434,7 @@ local function ShowTip(ic)
     end
   end
   if t.dist then GameTooltip:AddLine(format("%d yd away", t.dist), 0.7, 0.7, 0.7) end
+  if Focusable(t) then GameTooltip:AddLine("Click to focus this quest", 0.5, 0.8, 1) end
   GameTooltip:Show()
 end
 
@@ -430,6 +446,7 @@ function ns.MarkersStyle()
   if ns.Redraw then ns.Redraw() end
 end
 
+local dragged = false   -- set while the bar is being dragged by an icon, so letting go is not a click
 local function GetIcon(i)
   local ic = icons[i]
   if not ic then
@@ -438,9 +455,14 @@ local function GetIcon(i)
     ic:RegisterForDrag("LeftButton")
     ic:SetScript("OnEnter", ShowTip)
     ic:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    -- The icon is on top of the compass, so pass clicks and drags through to it.
-    ic:SetScript("OnMouseUp", function(_, button) ns.root:GetScript("OnMouseUp")(ns.root, button) end)
-    ic:SetScript("OnDragStart", function() ns.root:GetScript("OnDragStart")(ns.root) end)
+    -- The icon is on top of the compass, so pass clicks and drags through to it, except a plain
+    -- left click on a quest icon, which focuses that quest.
+    ic:SetScript("OnMouseDown", function() dragged = false end)
+    ic:SetScript("OnMouseUp", function(self, button)
+      if button == "LeftButton" and not dragged and Focusable(self.t) then FocusQuest(self.t.questID); return end
+      ns.root:GetScript("OnMouseUp")(ns.root, button)
+    end)
+    ic:SetScript("OnDragStart", function() dragged = true; ns.root:GetScript("OnDragStart")(ns.root) end)
     ic:SetScript("OnDragStop", function() ns.root:GetScript("OnDragStop")(ns.root) end)
     -- Drawn bottom to top: drop shadow, then the icon itself.
     ic.shadow = ic:CreateTexture(nil, "BACKGROUND", nil, 0)
@@ -473,11 +495,9 @@ local function Tinted(tex, t, r, g, b, a)
   tex:SetAlpha(a)
 end
 
--- Applies size, color, outline and shadow to one icon. Runs when settings or the icon's target change.
+-- Applies color and shadow to one icon (its size is set per draw in LayoutMarkers). Runs when settings or the icon's target change.
 local function Restyle(ic, t)
   local db = ns.db
-  local size = db.mk_size or 16
-  ic:SetSize(size, size)
   local c, native = db.mk_color, db.mk_native
   SetIcon(ic.tex, t)
   if native then
@@ -491,8 +511,10 @@ local function Restyle(ic, t)
   if sa > 0 then
     local off = db.mk_shadowDist or 1.5
     Tinted(ic.shadow, t, 0, 0, 0, sa * base)
-    ic.shadow:ClearAllPoints(); ic.shadow:SetPoint("CENTER", ic, "CENTER", off, -off)
-    ic.shadow:SetSize(size, size); ic.shadow:Show()
+    ic.shadow:ClearAllPoints()   -- anchored to both corners, so it follows the icon's size
+    ic.shadow:SetPoint("TOPLEFT", ic, "TOPLEFT", off, -off)
+    ic.shadow:SetPoint("BOTTOMRIGHT", ic, "BOTTOMRIGHT", off, -off)
+    ic.shadow:Show()
   else
     ic.shadow:Hide()
   end
@@ -509,14 +531,25 @@ end
 
 function ns.LayoutMarkers(b, ppd, half, fade, fadeZone)
   local db = ns.db
-  local size = db.mk_size or 16
-  -- Icons sit along the edge opposite the ticks, inside the bar.
-  local y = db.height / 2 - size / 2 - 1
-  if db.flipTicks then y = -y end
+  local base = db.mk_size or 16
+  local maxSize = max(base, db.height - 2)   -- the focused icon never makes the bar taller
+  local depth = db.mk_depth ~= false
   local shown = 0
   for i = 1, #active do
     local t = active[i]
     local ic = GetIcon(shown + 1)
+    local size = base
+    if t.primary then
+      size = min(base * FOCUS_SCALE, maxSize)
+    elseif depth and t.limit and t.limit > 0 then
+      -- Farther icons are smaller, down to FAR_SCALE of normal at the edge of their range.
+      size = max(6, base * (1 - (1 - FAR_SCALE) * min(t.dist / t.limit, 1)))
+    end
+    size = floor(size * 2 + 0.5) / 2   -- half-pixel steps, so the size is not re-set for tiny changes
+    if ic.sz ~= size then ic.sz = size; ic:SetSize(size, size) end
+    -- Icons sit along the edge opposite the ticks, inside the bar.
+    local y = db.height / 2 - size / 2 - 1
+    if db.flipTicks then y = -y end
     local showDist = t.primary and db.mk_distance
     local reach = size
     if showDist then

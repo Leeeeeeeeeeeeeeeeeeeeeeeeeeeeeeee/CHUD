@@ -44,6 +44,7 @@ ns.defaults = {
   mk_questie = true,       -- use Questie's icons for quests when Questie is installed
   mk_qRange = 100,         -- yards: Questie icons farther than this are hidden (the focused quest ignores it)
   mk_qFocusOnly = false,   -- show Questie icons only for the focused quest
+  mk_depth = true,         -- icons get smaller the farther away they are (the focused icon is always the largest)
   mk_color = { 1.00, 0.82, 0.00, 1.00 },        -- icon color (themes set it from their accent)
   mk_shadowAlpha = 0.6, mk_shadowDist = 1.5,   -- icon drop shadow: opacity (0 = off) and distance in pixels
   mk_native = false,                            -- true = keep the game's own icon colors instead of mk_color

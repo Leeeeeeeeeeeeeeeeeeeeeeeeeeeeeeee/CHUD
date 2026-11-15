@@ -35,12 +35,15 @@ ns.defaults = {
   xpFillStrength = 0.30,       -- opacity multiplier for the wash and its leading edge
   -- Markers (the menu that opens when you click the compass)
   mk_tracked = true,       -- tracked quest / waypoint
-  mk_objectives = false,   -- quest objectives and turn-ins on this map
+  mk_objectives = true,    -- quest objectives and turn-ins on this map
   mk_givers = false,       -- quests you can pick up
   mk_rares = false, mk_treasures = false,
   mk_herbs = false, mk_ore = false, mk_containers = false,   -- recorded gathering spots
   mk_distance = true,      -- distance under the tracked marker
   mk_size = 16, mk_range = 500,
+  mk_questie = true,       -- use Questie's icons for quests when Questie is installed
+  mk_qRange = 100,         -- yards: Questie icons farther than this are hidden (the focused quest ignores it)
+  mk_qFocusOnly = false,   -- show Questie icons only for the focused quest
   mk_color = { 1.00, 0.82, 0.00, 1.00 },        -- icon color (themes set it from their accent)
   mk_shadowAlpha = 0.6, mk_shadowDist = 1.5,   -- icon drop shadow: opacity (0 = off) and distance in pixels
   mk_native = false,                            -- true = keep the game's own icon colors instead of mk_color

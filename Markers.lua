@@ -6,6 +6,7 @@ local ADDON, ns = ...
 --   tracked   super-tracked quest waypoint, or the map waypoint you are tracking
 --   objective quests in your log that have a POI on the current map (turn-ins use the same option)
 --   giver     quests you could pick up here
+--   (When Questie is installed its map icons replace the game's own quest POIs for objective / turn-in / giver.)
 --   rare / treasure   "vignettes": the game's own rare/treasure/event markers
 --   herb / ore / box  spots RECORDED when you gather. There is no API for live nodes, so these
 --                     are places you have gathered before, not nodes that exist right now.
@@ -69,6 +70,68 @@ local function XY(vec)
   if not vec then return end
   local ok, x, y = pcall(vec.GetXY, vec)
   if ok and Num(x) and Num(y) then return x, y end
+end
+
+-- Questie ------------------------------------------------------------------------------------
+-- When Questie is installed, its map icons are the source for quest objectives, turn-ins and quest
+-- givers. Questie's public API (Questie.API) only offers readiness and quest-change callbacks, so
+-- icon positions come from its map frame registry (QuestieMap.questIdFrames). That table is internal
+-- to Questie: every access is guarded, so if it changes, Questie support quietly turns itself off
+-- and the game's own quest data is used instead.
+local Q = { map = nil, utils = nil, kinds = nil, hooked = false }
+local qcache = setmetatable({}, { __mode = "k" })   -- Questie icon frame -> its reusable target table
+local questieActive = false
+
+local function QuestieReady()
+  local Qe = _G.Questie
+  if not (type(Qe) == "table" and type(Qe.API) == "table" and Qe.API.isReady) then return end
+  if not Q.map then
+    local L = _G.QuestieLoader
+    if type(L) == "table" and L.ImportModule then
+      Q.map = Try(L.ImportModule, L, "QuestieMap")
+      Q.utils = Try(L.ImportModule, L, "TrackerUtils")
+    end
+    if type(Q.map) ~= "table" then Q.map = nil; return end
+  end
+  if not Q.kinds then
+    -- Questie icon type number -> the marker kind CHUD uses. Types not listed (glows, nodes, chests...) are ignored.
+    local k = {}
+    local function set(names, kind)
+      for _, n in ipairs(names) do
+        local v = Qe[n]
+        if type(v) == "number" then k[v] = kind end
+      end
+    end
+    set({ "ICON_TYPE_AVAILABLE", "ICON_TYPE_AVAILABLE_GRAY", "ICON_TYPE_REPEATABLE", "ICON_TYPE_EVENTQUEST",
+      "ICON_TYPE_PVPQUEST" }, "giver")
+    set({ "ICON_TYPE_COMPLETE", "ICON_TYPE_REPEATABLE_COMPLETE", "ICON_TYPE_EVENTQUEST_COMPLETE",
+      "ICON_TYPE_PVPQUEST_COMPLETE" }, "turnin")
+    set({ "ICON_TYPE_SLAY", "ICON_TYPE_LOOT", "ICON_TYPE_EVENT", "ICON_TYPE_OBJECT", "ICON_TYPE_TALK",
+      "ICON_TYPE_INTERACT" }, "objective")
+    Q.kinds = k
+  end
+  if not Q.hooked then
+    Q.hooked = true
+    -- Questie tells us when a quest is accepted, updated, turned in or abandoned.
+    Try(Qe.API.RegisterForQuestUpdates, function()
+      needRebuild = true
+      -- Questie draws its icons a moment after the event, so look again shortly after.
+      if C_Timer and C_Timer.After then C_Timer.After(1, function() needRebuild = true end) end
+    end)
+  end
+  return Qe
+end
+
+local function UseQuestie() return ns.db and ns.db.mk_questie ~= false and QuestieReady() end
+
+-- The quest the player has focused: Questie's focus, else the game's super-tracked quest.
+local function FocusedQuest()
+  local Qe = _G.Questie
+  local f = type(Qe) == "table" and type(Qe.db) == "table" and type(Qe.db.char) == "table" and Qe.db.char.TrackerFocus
+  if Num(f) and f > 0 then return f end
+  local ST = C_SuperTrack
+  local s = ST and Try(ST.GetSuperTrackedQuestID)
+  if Num(s) and s > 0 then return s end
 end
 
 -- Target collection (runs on events and every REFRESH seconds) ----------------------------------
@@ -152,6 +215,47 @@ local function AddQuests(chain)
   end
 end
 
+-- Questie's icons for the player's map. Questie draws one icon per spawn, so each quest and kind is
+-- grouped here and Tick keeps only the nearest of each group, which keeps the bar readable. Icons of the
+-- focused quest become the primary marker when the game gave no waypoint for it.
+local function AddQuestie(chain, focus)
+  local frames = Q.map.questIdFrames
+  if type(frames) ~= "table" then return end
+  local onMap = {}
+  for _, m in ipairs(chain) do onMap[m] = true end
+  local focusOnly = ns.db.mk_qFocusOnly
+  local trackedOn = On("tracked")
+  for qid, names in pairs(frames) do
+    if Num(qid) and qid ~= trackedQuest and (qid == focus or not focusOnly) and type(names) == "table" then
+      for _, name in pairs(names) do
+        local fr = _G[name]
+        local d = type(fr) == "table" and fr.data
+        if d and not fr.miniMapIcon and not fr.hidden and onMap[fr.UiMapID] and Num(fr.x) and Num(fr.y) then
+          local kind = Q.kinds[d.Icon]
+          local asKind, primary
+          if kind then
+            if qid == focus then
+              if trackedOn then asKind, primary = "tracked", true end
+            elseif On(kind) then
+              asKind = kind
+            end
+          end
+          if asKind then
+            local t = qcache[fr]
+            if not t then t = {}; qcache[fr] = t end
+            t.kind, t.mapID, t.x, t.y, t.questID, t.src = asKind, fr.UiMapID, fr.x / 100, fr.y / 100, qid, "questie"
+            t.primary = primary
+            t.group = primary and ("f" .. qid) or ("q" .. qid .. asKind)
+            local qd = d.QuestData
+            t.label = Try(C_QuestLog.GetTitleForQuestID, qid) or (type(qd) == "table" and type(qd.name) == "string" and qd.name) or nil
+            targets[#targets + 1] = t
+          end
+        end
+      end
+    end
+  end
+end
+
 local function AddVignettes(pm)
   local V = C_VignetteInfo
   if not V then return end
@@ -196,7 +300,12 @@ function Rebuild()
   local pm = Try(C_Map.GetBestMapForUnit, "player")
   if not Num(pm) then return end
   if On("tracked") then AddTracked(pm) else trackedQuest = nil end
-  if On("objective") or On("giver") then AddQuests(MapChain(pm)) end
+  questieActive = UseQuestie() and true or false
+  if questieActive then
+    if On("objective") or On("giver") or On("tracked") then AddQuestie(MapChain(pm), FocusedQuest()) end
+  elseif On("objective") or On("giver") then
+    AddQuests(MapChain(pm))
+  end
   if On("rare") or On("treasure") then AddVignettes(pm) end
   AddNodes(pm)
 end
@@ -208,9 +317,11 @@ local function SortFn(a, b)
   return a.dist < b.dist
 end
 
-local lastCount = 0
+local lastCount, tickNo = 0, 0
+local best = {}   -- nearest candidate per group, rebuilt every tick
 local function Tick()
   local changed = false   -- did anything visible move since the last redraw?
+  tickNo = tickNo + 1
   wipe(active)
   local db = ns.db
   if db and #targets > 0 then
@@ -218,7 +329,8 @@ local function Tick()
     local px, py = XY(pm and Try(C_Map.GetPlayerMapPosition, pm, "player"))
     local w, h = Try(C_Map.GetMapWorldSize, pm)
     if px and Num(w) and Num(h) and w > 0 and h > 0 then
-      local range = db.mk_range or 500
+      local range, qRange = db.mk_range or 500, db.mk_qRange or 100
+      wipe(best)
       for i = 1, #targets do
         local t = targets[i]
         local tx, ty
@@ -226,8 +338,8 @@ local function Tick()
           tx, ty = t.x, t.y
         else
           -- Another map: go through world coordinates onto the player's map (cached per player map).
-          if t.cmap ~= pm then
-            t.cmap, t.cx, t.cy = pm, nil, nil
+          if t.cmap ~= pm or t.cfrom ~= t.mapID then
+            t.cmap, t.cfrom, t.cx, t.cy = pm, t.mapID, nil, nil
             local cont, wp = Try(C_Map.GetWorldPosFromMapPos, t.mapID, CreateVector2D(t.x, t.y))
             if cont and wp then
               t.cx, t.cy = XY(Try(C_Map.GetMapPosFromWorldPos, cont, wp, pm))
@@ -238,20 +350,32 @@ local function Tick()
         if tx then
           local east, north = (tx - px) * w, -(ty - py) * h   -- map y grows southward
           local dist = sqrt(east * east + north * north)
-          if t.primary or dist <= range then
-            t.dist = dist
+          local limit = (t.src == "questie") and qRange or range
+          if t.primary or dist <= limit then
+            t.dist, t.limit = dist, limit
             t.bearing = (deg(atan2(east, north))) % 360
-            -- Only worth a redraw if the icon moved at least 0.15 degrees, or its 5-yard distance label changed.
-            local d5 = floor(dist / 5)
-            if not t.drawn or abs(t.bearing - t.drawn) > 0.15 or d5 ~= t.drawnD then
-              t.drawn, t.drawnD, changed = t.bearing, d5, true
+            local g = t.group
+            if g then
+              local cur = best[g]
+              if not cur or dist < cur.dist then best[g] = t end
+            else
+              active[#active + 1] = t
             end
-            active[#active + 1] = t
           end
         end
       end
+      for _, t in pairs(best) do active[#active + 1] = t end
       table.sort(active, SortFn)
       for i = #active, MAX_ICONS + 1, -1 do active[i] = nil end
+      for i = 1, #active do
+        local t = active[i]
+        -- Only worth a redraw if the icon is new to the bar, moved at least 0.15 degrees, or its 5-yard distance label changed.
+        local d5 = floor(t.dist / 5)
+        if t.seen ~= tickNo - 1 or not t.drawn or abs(t.bearing - t.drawn) > 0.15 or d5 ~= t.drawnD then
+          t.drawn, t.drawnD, changed = t.bearing, d5, true
+        end
+        t.seen = tickNo
+      end
     end
   end
   -- Redraw only when an icon actually moved or the set of icons changed, so standing still costs nothing.
@@ -548,4 +672,11 @@ function ns.MarkerDebug()
     if not (_G[t] and _G[t][key]) then missing[#missing + 1] = n end
   end
   print("  missing APIs:", #missing == 0 and "none" or table.concat(missing, ", "))
+  local qstate = "not installed"
+  if _G.Questie then
+    if not QuestieReady() then qstate = "installed, not ready yet"
+    elseif db.mk_questie == false then qstate = "installed, turned off in the menu"
+    else qstate = "in use" end
+  end
+  print("  questie:", qstate)
 end

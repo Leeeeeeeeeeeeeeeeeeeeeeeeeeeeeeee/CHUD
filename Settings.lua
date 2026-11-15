@@ -624,7 +624,14 @@ function ns.ToggleMarkerMenu()
   markerMenu = markerMenu or BuildMarkerMenu()
   if markerMenu:IsShown() then markerMenu:Hide(); return end
   markerMenu:ClearAllPoints()
-  markerMenu:SetPoint("TOP", ns.root, "BOTTOM", 0, -8)
+  -- Leave room under the bar (the icons and their distance text sit there) so size and style changes can be watched
+  -- live. When the bar is in the lower half of the screen the menu opens above it instead.
+  local _, cy = ns.root:GetCenter()
+  if type(cy) == "number" and cy < UIParent:GetHeight() / 2 then
+    markerMenu:SetPoint("BOTTOM", ns.root, "TOP", 0, 60)
+  else
+    markerMenu:SetPoint("TOP", ns.root, "BOTTOM", 0, -60)
+  end
   markerMenu:Show()
 end
 

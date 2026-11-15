@@ -58,6 +58,8 @@ local targets = {}   -- every candidate: { kind, mapID, x, y, label, atlas?, pri
 local active = {}    -- candidates in range this tick, primary first then nearest first
 local icons = {}     -- frame pool
 local needRebuild = true
+local tickDirty = true   -- something other than the player's position changed (targets rebuilt, options): Tick must run
+local tickPm, tickPX, tickPY   -- map and position at the last full Tick; while all three are unchanged and nothing is dirty, Tick has nothing new
 
 local function Try(fn, ...)
   if type(fn) ~= "function" then return end
@@ -320,6 +322,7 @@ end
 local Rebuild
 function Rebuild()
   needRebuild = false
+  tickDirty = true
   wipe(targets)
   if not ns.db or not AnyOn() then return end
   local pm = Try(C_Map.GetBestMapForUnit, "player")
@@ -369,13 +372,18 @@ local lastPm, lastW, lastH   -- the player's map and its size in yards, as of th
 local lastPX, lastPY   -- the player's map position at the last full Tick or FastTick (FastTick skips when it is unchanged)
 local best = {}   -- nearest candidate per group, rebuilt every tick
 local function Tick()
+  -- Standing still with the same targets: distances and bearings cannot have changed, so keep the last result.
+  -- (tickNo and the active list are left alone, so the next real Tick still sees these icons as already drawn.)
+  local pm = Try(C_Map.GetBestMapForUnit, "player")
+  local px, py = XY(pm and Try(C_Map.GetPlayerMapPosition, pm, "player"))
+  if not tickDirty and px and pm == tickPm and px == tickPX and py == tickPY then return end
+  tickDirty = false
+  tickPm, tickPX, tickPY = pm, px, py
   local changed = false   -- did anything visible move since the last redraw?
   tickNo = tickNo + 1
   wipe(active)
   local db = ns.db
   if db and #targets > 0 then
-    local pm = Try(C_Map.GetBestMapForUnit, "player")
-    local px, py = XY(pm and Try(C_Map.GetPlayerMapPosition, pm, "player"))
     local w, h = Try(C_Map.GetMapWorldSize, pm)
     if px and Num(w) and Num(h) and w > 0 and h > 0 then
       lastPX, lastPY = px, py
@@ -400,12 +408,16 @@ local function Tick()
               if not cur or dist < cur.dist then best[t.group] = t end
             end
           elseif t.primary or dist <= limit then
-            t.dist, t.limit, t.east, t.north = dist, limit, east, north
             local g = t.group
+            -- Only a target that is kept needs its fields written; most Questie icons lose to a nearer one of their group.
             if g then
               local cur = best[g]
-              if not cur or dist < cur.dist then best[g] = t end
+              if not cur or dist < cur.dist then
+                t.dist, t.limit, t.east, t.north = dist, limit, east, north
+                best[g] = t
+              end
             else
+              t.dist, t.limit, t.east, t.north = dist, limit, east, north
               active[#active + 1] = t
             end
           end
@@ -672,22 +684,30 @@ function ns.LayoutMarkers(b, ppd, half, fade, fadeZone)
         ic.dist:ClearAllPoints()
         if flip then ic.dist:SetPoint("BOTTOM", ic, "TOP", 0, -1) else ic.dist:SetPoint("TOP", ic, "BOTTOM", 0, 1) end
       end
+      -- Each of these is a call into the game, so they only happen when the value actually changed.
       if t.inArea then
-        ic.glow:SetSize(min(size * 2, db.height), min(size * 2, db.height))   -- never spills outside the bar
-        ic.glow:Show()
+        local gs = min(size * 2, db.height)   -- never spills outside the bar
+        if ic.glowSz ~= gs then ic.glowSz = gs; ic.glow:SetSize(gs, gs) end
+        if ic.glowOn ~= true then ic.glowOn = true; ic.glow:Show() end
         if ic.glowAnim and not ic.glowAnim:IsPlaying() then ic.glowAnim:Play() end
-      else
+      elseif ic.glowOn ~= false then
+        ic.glowOn = false
         ic.glow:Hide()
         if ic.glowAnim then ic.glowAnim:Stop() end
       end
-      ic:ClearAllPoints()
-      ic:SetPoint("CENTER", ns.strip, "CENTER", x, y)
-      ic:SetAlpha(alpha * dim)
-      ic:Show()
-      ic.dist:SetShown(showDist)
+      ic:SetPoint("CENTER", ns.strip, "CENTER", x, y)   -- setting an anchor point that already exists replaces it, so no ClearAllPoints
+      local a = floor(alpha * dim * 100 + 0.5) / 100
+      if ic.al ~= a then ic.al = a; ic:SetAlpha(a) end
+      if not ic.on then ic.on = true; ic:Show() end
+      local sd = showDist and true or false
+      if ic.sd ~= sd then ic.sd = sd; ic.dist:SetShown(sd) end
     end
   end
-  for i = shown + 1, #icons do icons[i]:Hide(); icons[i].t = nil end   -- hiding the icon hides its glow too
+  for i = shown + 1, #icons do   -- hiding the icon hides its glow too
+    local ic = icons[i]
+    if ic.on then ic.on = false; ic:Hide() end
+    ic.t = nil
+  end
 end
 
 ns.LayoutMarkers = ns.Perf("LayoutMarkers", ns.LayoutMarkers)

@@ -32,6 +32,8 @@ local FADE_RANGE = { giver = { "mk_giverRange", 300 }, objective = { "mk_objRang
 local FAR_SCALE = 0.6     -- an icon at its maximum range is this fraction of normal size (when Smaller When Far is on)
 local TICK = 0.25       -- seconds between bearing updates
 local REFRESH = 4.0     -- seconds between full re-queries (events and the Questie callback also trigger one)
+local MIN_REBUILD = 1.0 -- seconds between re-queries caused by quest-log, vignette and Questie updates, which arrive in bursts
+local RESCAN = 5        -- yards the player must move before every target is scanned again; in between, only the icons on the bar are updated
 local MAX_NODES = 500   -- recorded spots kept per kind per map
 local DEDUPE = 15       -- yards: a new gather within this of a recorded spot is the same spot
 
@@ -57,7 +59,8 @@ local ICON = {
 local targets = {}   -- every candidate: { kind, mapID, x, y, label, atlas?, primary? }
 local active = {}    -- candidates in range this tick, primary first then nearest first
 local icons = {}     -- frame pool
-local needRebuild = true
+local needRebuild = true   -- targets are out of date; honoured at most once per MIN_REBUILD seconds (events come in bursts)
+local forceRebuild = true  -- same, but honoured at the next tick (option changes, focus changes, a new map)
 local tickDirty = true   -- something other than the player's position changed (targets rebuilt, options): Tick must run
 local tickPm, tickPX, tickPY   -- map and position at the last full Tick; while all three are unchanged and nothing is dirty, Tick has nothing new
 
@@ -321,7 +324,7 @@ end
 
 local Rebuild
 function Rebuild()
-  needRebuild = false
+  needRebuild, forceRebuild = false, false
   tickDirty = true
   wipe(targets)
   if not ns.db or not AnyOn() then return end
@@ -371,82 +374,104 @@ local lastCount, tickNo = 0, 0
 local lastPm, lastW, lastH   -- the player's map and its size in yards, as of the last full Tick (FastTick reuses them)
 local lastPX, lastPY   -- the player's map position at the last full Tick or FastTick (FastTick skips when it is unchanged)
 local best = {}   -- nearest candidate per group, rebuilt every tick
+local scanPX, scanPY   -- the player's position at the last full scan of every target
 local function Tick()
-  -- Standing still with the same targets: distances and bearings cannot have changed, so keep the last result.
-  -- (tickNo and the active list are left alone, so the next real Tick still sees these icons as already drawn.)
   local pm = Try(C_Map.GetBestMapForUnit, "player")
   local px, py = XY(pm and Try(C_Map.GetPlayerMapPosition, pm, "player"))
+  if pm ~= tickPm then forceRebuild = true end   -- a new map without a zone event: collect its targets at the next tick
+  -- Standing still with the same targets: distances and bearings cannot have changed, so keep the last result.
+  -- (tickNo and the active list are left alone, so the next real Tick still sees these icons as already drawn.)
   if not tickDirty and px and pm == tickPm and px == tickPX and py == tickPY then return end
+  -- Moved only a little since every target was last scanned: which icons are on the bar cannot meaningfully have changed,
+  -- so only those icons are re-aimed. Every target is scanned again after RESCAN yards, or when anything else changed.
+  local light = false
+  if not tickDirty and px and pm == tickPm and scanPX and lastPm == pm then
+    local mx, my = (px - scanPX) * lastW, (py - scanPY) * lastH
+    light = mx * mx + my * my < RESCAN * RESCAN
+  end
   tickDirty = false
   tickPm, tickPX, tickPY = pm, px, py
   local changed = false   -- did anything visible move since the last redraw?
-  tickNo = tickNo + 1
-  wipe(active)
   local db = ns.db
-  if db and #targets > 0 then
-    local w, h = Try(C_Map.GetMapWorldSize, pm)
-    if px and Num(w) and Num(h) and w > 0 and h > 0 then
-      lastPX, lastPY = px, py
-      lastPm, lastW, lastH = pm, w, h
-      local range, qRange = db.mk_range or 500, db.mk_qRange or 600
-      wipe(best)
-      local fNear   -- nearest icon of the focused quest (when Questie supplies its primary marker)
-      for i = 1, #targets do
-        local t = targets[i]
-        local tx, ty = TargetXY(t, pm)
-        if tx then
-          local dist, east, north = Dist(tx, ty, px, py, w, h)
-          local limit = (t.src == "questie") and qRange or range
-          if t.focus then
-            -- An icon of the focused quest: it shows like any other (nearest per type, within range), and the
-            -- nearest one overall, however far, becomes the primary marker below.
-            t.dist, t.limit, t.east, t.north = dist, limit, east, north
-            t.primary, t.kind = nil, t.baseKind
-            if not fNear or dist < fNear.dist then fNear = t end
-            if t.shows and dist <= limit then
-              local cur = best[t.group]
-              if not cur or dist < cur.dist then best[t.group] = t end
-            end
-          elseif t.primary or dist <= limit then
-            local g = t.group
-            -- Only a target that is kept needs its fields written; most Questie icons lose to a nearer one of their group.
-            if g then
-              local cur = best[g]
-              if not cur or dist < cur.dist then
-                t.dist, t.limit, t.east, t.north = dist, limit, east, north
-                best[g] = t
-              end
-            else
+  if light then
+    lastPX, lastPY = px, py
+    for i = 1, #active do
+      local t = active[i]
+      local tx, ty = TargetXY(t, pm)
+      if tx then t.dist, t.east, t.north = Dist(tx, ty, px, py, lastW, lastH) end
+    end
+  else
+    tickNo = tickNo + 1
+    wipe(active)
+    scanPX, scanPY = nil, nil
+    if db and #targets > 0 then
+      local w, h = Try(C_Map.GetMapWorldSize, pm)
+      if px and Num(w) and Num(h) and w > 0 and h > 0 then
+        lastPX, lastPY = px, py
+        lastPm, lastW, lastH = pm, w, h
+        scanPX, scanPY = px, py
+        local range, qRange = db.mk_range or 500, db.mk_qRange or 600
+        wipe(best)
+        local fNear   -- nearest icon of the focused quest (when Questie supplies its primary marker)
+        for i = 1, #targets do
+          local t = targets[i]
+          local tx, ty
+          if t.mapID == pm then tx, ty = t.x, t.y else tx, ty = TargetXY(t, pm) end   -- the common case without a call
+          if tx then
+            local east, north = (tx - px) * w, -(ty - py) * h   -- map y grows southward (same math as Dist)
+            local dist = sqrt(east * east + north * north)
+            local limit = (t.src == "questie") and qRange or range
+            if t.focus then
+              -- An icon of the focused quest: it shows like any other (nearest per type, within range), and the
+              -- nearest one overall, however far, becomes the primary marker below.
               t.dist, t.limit, t.east, t.north = dist, limit, east, north
-              active[#active + 1] = t
+              t.primary, t.kind = nil, t.baseKind
+              if not fNear or dist < fNear.dist then fNear = t end
+              if t.shows and dist <= limit then
+                local cur = best[t.group]
+                if not cur or dist < cur.dist then best[t.group] = t end
+              end
+            elseif t.primary or dist <= limit then
+              local g = t.group
+              -- Only a target that is kept needs its fields written; most Questie icons lose to a nearer one of their group.
+              if g then
+                local cur = best[g]
+                if not cur or dist < cur.dist then
+                  t.dist, t.limit, t.east, t.north = dist, limit, east, north
+                  best[g] = t
+                end
+              else
+                t.dist, t.limit, t.east, t.north = dist, limit, east, north
+                active[#active + 1] = t
+              end
             end
           end
         end
-      end
-      if fNear then
-        fNear.primary, fNear.kind = true, "tracked"
-        best[fNear.group] = fNear
-      end
-      for _, t in pairs(best) do active[#active + 1] = t end
-      table.sort(active, SortFn)
-      for i = #active, MAX_ICONS + 1, -1 do active[i] = nil end
-      for i = 1, #active do
-        local t = active[i]
-        t.bearing = Bearing(t.east, t.north)
-        -- Only worth a redraw if the icon is new to the bar, moved at least 0.15 degrees, or its 5-yard distance label changed.
-        local d5 = floor(t.dist / 5)
-        if t.seen ~= tickNo - 1 or not t.drawn or abs(t.bearing - t.drawn) > 0.15 or d5 ~= t.drawnD then
-          t.drawn, t.drawnD, changed = t.bearing, d5, true
+        if fNear then
+          fNear.primary, fNear.kind = true, "tracked"
+          best[fNear.group] = fNear
         end
-        t.seen = tickNo
-        -- Quest-area glow: only the focused quest's marker, and only where the client can tell us.
-        local inside
-        if t.primary and t.questID and db.mk_areaGlow ~= false and AreaApi() then
-          inside = Try(C_Minimap.IsInsideQuestBlob, t.questID) and true or false
-        end
-        if inside ~= t.inArea then t.inArea = inside; changed = true end
+        for _, t in pairs(best) do active[#active + 1] = t end
+        table.sort(active, SortFn)
+        for i = #active, MAX_ICONS + 1, -1 do active[i] = nil end
       end
     end
+  end
+  for i = 1, #active do
+    local t = active[i]
+    t.bearing = Bearing(t.east, t.north)
+    -- Only worth a redraw if the icon is new to the bar, moved at least 0.15 degrees, or its 5-yard distance label changed.
+    local d5 = floor(t.dist / 5)
+    if (not light and t.seen ~= tickNo - 1) or not t.drawn or abs(t.bearing - t.drawn) > 0.15 or d5 ~= t.drawnD then
+      t.drawn, t.drawnD, changed = t.bearing, d5, true
+    end
+    t.seen = tickNo
+    -- Quest-area glow: only the focused quest's marker, and only where the client can tell us.
+    local inside
+    if t.primary and t.questID and db.mk_areaGlow ~= false and AreaApi() then
+      inside = Try(C_Minimap.IsInsideQuestBlob, t.questID) and true or false
+    end
+    if inside ~= t.inArea then t.inArea = inside; changed = true end
   end
   -- Redraw only when an icon actually moved or the set of icons changed, so standing still costs nothing.
   if (changed or #active ~= lastCount) and ns.Redraw then ns.Redraw() end
@@ -472,7 +497,7 @@ end
 local function FocusQuest(qid)
   local ST = C_SuperTrack
   if ST and ST.SetSuperTrackedQuestID then pcall(ST.SetSuperTrackedQuestID, qid) end
-  needRebuild = true
+  forceRebuild = true
 end
 
 -- Hover tooltip for a marker: what it is, the quest's objectives, and how far away it is.
@@ -630,6 +655,9 @@ function ns.LayoutMarkers(b, ppd, half, fade, fadeZone)
   local shown = 0
   for i = 1, #active do
     local t = active[i]
+    local x = (((t.bearing - b + 540) % 360) - 180) * ppd
+    -- An icon past the end of the bar is never drawn (only the primary one is pinned to the edge), so skip all its work.
+    if t.primary or abs(x) <= half then
     local ic = GetIcon(shown + 1)
     local size, dim = base, 1
     if t.primary then
@@ -662,7 +690,6 @@ function ns.LayoutMarkers(b, ppd, half, fade, fadeZone)
       reach = max(size, ic.dist:GetStringWidth())
     end
     local lim = half - reach / 2 - 2
-    local x = (((t.bearing - b + 540) % 360) - 180) * ppd
     local show = true
     if abs(x) > lim then
       if t.primary then x = (x > 0) and lim or -lim      -- pinned to the edge: turn this way
@@ -702,6 +729,7 @@ function ns.LayoutMarkers(b, ppd, half, fade, fadeZone)
       local sd = showDist and true or false
       if ic.sd ~= sd then ic.sd = sd; ic.dist:SetShown(sd) end
     end
+    end   -- of: on the bar, or primary
   end
   for i = shown + 1, #icons do   -- hiding the icon hides its glow too
     local ic = icons[i]
@@ -806,8 +834,11 @@ ev:SetScript("OnEvent", function(_, event, ...)
     if pending and pending.spell == spellID then Record(pending); pending = nil end
   elseif event == "UNIT_SPELLCAST_INTERRUPTED" or event == "UNIT_SPELLCAST_FAILED" then
     pending = nil
+  elseif event == "QUEST_LOG_UPDATE" or event == "QUEST_POI_UPDATE" or event == "VIGNETTES_UPDATED"
+    or event == "VIGNETTE_MINIMAP_UPDATED" then
+    needRebuild = true    -- these fire in bursts (looting, combat): at most one re-query per MIN_REBUILD seconds
   else
-    needRebuild = true
+    forceRebuild = true   -- zone, focus and waypoint changes show at the next tick
   end
 end)
 
@@ -822,13 +853,13 @@ ev:SetScript("OnUpdate", ns.Perf("Markers", function(_, elapsed)
     return
   end
   acc, accFast = 0, 0
-  if needRebuild or accRefresh >= REFRESH then accRefresh = 0; Rebuild() end
+  if forceRebuild or (needRebuild and accRefresh >= MIN_REBUILD) or accRefresh >= REFRESH then accRefresh = 0; Rebuild() end
   Tick()
 end))
 
 -- Called by the menu whenever an option changes.
 function ns.MarkersChanged()
-  needRebuild = true
+  forceRebuild = true
   acc = TICK   -- run at the next frame
 end
 

@@ -234,8 +234,9 @@ end
 
 -- Questie's icons for the player's map. Questie draws one icon per spawn (on both the world map and the
 -- minimap, and an icon can be hidden on one but not the other), so each quest and icon type is grouped here and
--- Tick keeps only the nearest of each group, which keeps the bar readable. Icons of the
--- focused quest become the primary marker when the game gave no waypoint for it.
+-- Tick keeps only the nearest of each group, which keeps the bar readable.
+-- The focused quest keeps all of its icons like any other quest. When the game gave no waypoint for it, its
+-- nearest icon is also promoted to the large primary marker (Tick does that, since "nearest" changes as you move).
 local function AddQuestie(chain, focus)
   local Qe = _G.Questie
   local frames = Q.map.questIdFrames
@@ -245,27 +246,22 @@ local function AddQuestie(chain, focus)
   local focusOnly = ns.db.mk_qFocusOnly
   local trackedOn = On("tracked")
   for qid, names in pairs(frames) do
-    if Num(qid) and qid ~= trackedQuest and (qid == focus or not focusOnly) and type(names) == "table" then
+    if Num(qid) and (qid == focus or not focusOnly) and type(names) == "table" then
+      local promote = trackedOn and qid == focus and qid ~= trackedQuest   -- no game waypoint for it: Questie provides the primary
       for _, name in pairs(names) do
         local fr = _G[name]
         local d = type(fr) == "table" and fr.data
         if d and not fr.hidden and onMap[fr.UiMapID] and Num(fr.x) and Num(fr.y) then
           local kind = Q.kinds[d.Icon]
-          local asKind, primary
-          if kind then
-            if qid == focus then
-              if trackedOn then asKind, primary = "tracked", true end
-            elseif On(kind) then
-              asKind = kind
-            end
-          end
-          if asKind then
+          local shows = kind and On(kind)
+          if kind and (shows or promote) then
             local t = qcache[fr]
             if not t then t = {}; qcache[fr] = t end
-            t.kind, t.mapID, t.x, t.y, t.questID, t.src = asKind, fr.UiMapID, fr.x / 100, fr.y / 100, qid, "questie"
-            t.primary = primary
+            t.kind, t.baseKind, t.shows = kind, kind, shows
+            t.mapID, t.x, t.y, t.questID, t.src = fr.UiMapID, fr.x / 100, fr.y / 100, qid, "questie"
+            t.focus, t.primary = promote or nil, nil
             t.file = type(Qe.usedIcons) == "table" and Qe.usedIcons[d.Icon] or nil   -- Questie's art for this objective type (bag, sword...)
-            t.group = primary and ("f" .. qid) or ("q" .. qid .. ":" .. tostring(d.Icon))
+            t.group = "q" .. qid .. ":" .. tostring(d.Icon)
             local qd = d.QuestData
             t.label = Try(C_QuestLog.GetTitleForQuestID, qid) or (type(qd) == "table" and type(qd.name) == "string" and qd.name) or nil
             targets[#targets + 1] = t
@@ -373,13 +369,24 @@ local function Tick()
       lastPX, lastPY = px, py
       local range, qRange = db.mk_range or 500, db.mk_qRange or 100
       wipe(best)
+      local fNear   -- nearest icon of the focused quest (when Questie supplies its primary marker)
       for i = 1, #targets do
         local t = targets[i]
         local tx, ty = TargetXY(t, pm)
         if tx then
           local dist, bearing = Aim(tx, ty, px, py, w, h)
           local limit = (t.src == "questie") and qRange or range
-          if t.primary or dist <= limit then
+          if t.focus then
+            -- An icon of the focused quest: it shows like any other (nearest per type, within range), and the
+            -- nearest one overall, however far, becomes the primary marker below.
+            t.dist, t.limit, t.bearing = dist, limit, bearing
+            t.primary, t.kind = nil, t.baseKind
+            if not fNear or dist < fNear.dist then fNear = t end
+            if t.shows and dist <= limit then
+              local cur = best[t.group]
+              if not cur or dist < cur.dist then best[t.group] = t end
+            end
+          elseif t.primary or dist <= limit then
             t.dist, t.limit, t.bearing = dist, limit, bearing
             local g = t.group
             if g then
@@ -390,6 +397,10 @@ local function Tick()
             end
           end
         end
+      end
+      if fNear then
+        fNear.primary, fNear.kind = true, "tracked"
+        best[fNear.group] = fNear
       end
       for _, t in pairs(best) do active[#active + 1] = t end
       table.sort(active, SortFn)

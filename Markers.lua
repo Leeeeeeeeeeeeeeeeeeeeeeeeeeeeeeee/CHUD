@@ -774,5 +774,56 @@ function ns.MarkerDebug()
     print("  questie icons:", "total", n.total, "| hidden by Questie", n.hidden, "| minimap copies", n.mini,
       "| usable: objective", byKind.objective or 0, "giver", byKind.giver or 0, "turnin", byKind.turnin or 0, "| skipped", n.other)
   end
+  -- Quest givers: where do they drop out? (read only; counts every step for the player's current map)
+  if _G.Questie and Q.map and Q.kinds and type(Q.map.questIdFrames) == "table" then
+    local chain = {}
+    for _, m in ipairs(pm and MapChain(pm) or {}) do chain[m] = true end
+    local w, h = Try(C_Map.GetMapWorldSize, pm)
+    local g = { all = 0, shown = 0, hiddenWorld = 0, hiddenMini = 0, onMap = 0, near = 0 }
+    local byMap, nearest, nearestQuest = {}, nil, nil
+    for qid, names in pairs(Q.map.questIdFrames) do
+      if type(names) == "table" then
+        for _, name in pairs(names) do
+          local fr = _G[name]
+          local d = type(fr) == "table" and fr.data
+          if d and Q.kinds[d.Icon] == "giver" then
+            g.all = g.all + 1
+            if fr.hidden then
+              if fr.miniMapIcon then g.hiddenMini = g.hiddenMini + 1 else g.hiddenWorld = g.hiddenWorld + 1 end
+            else
+              g.shown = g.shown + 1
+              byMap[fr.UiMapID or 0] = (byMap[fr.UiMapID or 0] or 0) + 1
+              if chain[fr.UiMapID] and Num(fr.x) and Num(fr.y) then
+                g.onMap = g.onMap + 1
+                if x and Num(w) and Num(h) and fr.UiMapID == pm then
+                  local dx, dy = (fr.x / 100 - x) * w, (fr.y / 100 - y) * h
+                  local dist = sqrt(dx * dx + dy * dy)
+                  if not nearest or dist < nearest then nearest, nearestQuest = dist, qid end
+                  if dist <= (db.mk_qRange or 100) then g.near = g.near + 1 end
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+    print("  questie givers:", "total", g.all, "| hidden (world map copy)", g.hiddenWorld, "(minimap copy)", g.hiddenMini,
+      "| shown", g.shown, "| on this map", g.onMap, "| within", db.mk_qRange or 100, "yd", g.near,
+      "| nearest", nearest and format("%d yd (quest %s)", floor(nearest), tostring(nearestQuest)) or "none on this map")
+    local list = {}
+    for m, n in pairs(byMap) do list[#list + 1] = { m = m, n = n } end
+    table.sort(list, function(a, b) return a.n > b.n end)
+    local parts = {}
+    for i = 1, math.min(#list, 8) do parts[i] = list[i].m .. "=" .. list[i].n end
+    print("  shown giver icons by map id:", #parts > 0 and table.concat(parts, " ") or "none",
+      "| this map and parents:", pm and table.concat(MapChain(pm), ",") or "?",
+      "| Quest Givers option:", db.mk_givers and "on" or "OFF", "| Use Questie:", db.mk_questie ~= false and "on" or "off")
+    local qp = type(_G.Questie.db) == "table" and _G.Questie.db.profile
+    if type(qp) == "table" then
+      print("  Questie settings (read only): enableMapIcons", tostring(qp.enableMapIcons), "| enableMiniMapIcons", tostring(qp.enableMiniMapIcons),
+        "| showAvailableQuests", tostring(qp.showAvailableQuests), "| enableAvailable", tostring(qp.enableAvailable),
+        "| hideUnexploredMapIcons", tostring(qp.hideUnexploredMapIcons))
+    end
+  end
   print("  quest area glow:", AreaApi() and "supported" or "not supported by this client")
 end

@@ -43,7 +43,13 @@ ns.defaults = {
   mk_objectives = true,    -- quest objectives and turn-ins on this map
   mk_givers = false,       -- quests you can pick up
   mk_rares = false, mk_treasures = false,
-  mk_corpse = true,        -- your corpse, while you are a ghost
+  mk_corpse = true, mk_gm2 = true, mk_gm2data = true, mk_gl = true, mk_gmFilter = true, mk_gnext = true, mk_gnextOnly = true, mk_partySmooth = true,        -- your corpse, while you are a ghost
+  -- Fading (see Fade.lua). Off by default; these are not part of a theme.
+  fadeOn = false,          -- fade the bar out when none of the "show when" situations apply
+  fadeCombat = false, fadeMap = true, fadeMouse = true, fadeRun = true, fadeAuto = false, fadeDead = true,   -- when to show it
+  tourDone = false,        -- the setup tour has been shown or skipped (Install.lua)
+  masterAlpha = 1,         -- overall opacity of the bar, fading or not
+  fadeAlpha = 0,           -- opacity while faded out
   mk_party = true,         -- party members (names show only when icons are outside the bar)
   mk_partyLimit = false,   -- true = party members obey Max Distance; false = shown at any distance
   mk_herbs = false, mk_ore = false, mk_containers = false,   -- recorded gathering spots
@@ -62,12 +68,13 @@ ns.defaults = {
   mk_shadowAlpha = 0.6, mk_shadowDist = 1.5,   -- icon drop shadow: opacity (0 = off) and distance in pixels
   mk_native = false,                            -- true = keep the game's own icon colors instead of mk_color
   nodes = {},              -- recorded gathering spots: nodes[kind][mapID] = { {x, y, name}, ... }
-  hideBlizzXP = false,   -- hide the default Blizzard XP bar (not part of themes or the group resets)
+  hideBlizzXP = true,   -- hide the default Blizzard XP bar, since CHUD has its own (not part of themes or the group resets)
   rightClickMenu = true,   -- right-click the bar to open the marker/quick menu (it holds unlock, center and every marker option)
   glitchFx = true,     -- glitch/"broken HUD" effect in dungeons; off = plain fade
   optimize = true,     -- low-CPU rendering (skips redundant updates)
 }
 
+-- Deep copy of a value (tables are copied recursively), so defaults are never shared with saved settings.
 local function Copy(v)
   if type(v) ~= "table" then return v end
   local t = {}
@@ -76,9 +83,10 @@ local function Copy(v)
 end
 ns.Copy = Copy
 
--- Self-profiler. /chud perf starts timing; run it again to print, for each wrapped function, how many
+-- Self-profiler. /chud debug perf starts timing; run it again to print, for each wrapped function, how many
 -- times it ran and the time it took. Wrapped functions cost one boolean check while profiling is off.
 local perf = { on = false, t0 = 0, rows = {} }
+-- Wraps fn so its calls and time are counted for the performance report; returns the wrapped function.
 function ns.Perf(name, fn)
   local row = { name = name, calls = 0, ms = 0 }
   perf.rows[#perf.rows + 1] = row
@@ -90,11 +98,12 @@ function ns.Perf(name, fn)
     return a, b, c
   end
 end
+-- Turns the performance counters on or off.
 function ns.PerfToggle()
   if not perf.on then
     for _, r in ipairs(perf.rows) do r.calls, r.ms = 0, 0 end
     perf.on, perf.t0 = true, GetTime()
-    print("CHUD: profiling started. Play normally for a minute, then run /chud perf again.")
+    print("CHUD: profiling started. Play normally for a minute, then run /chud debug perf again.")
     return
   end
   perf.on = false
@@ -131,7 +140,7 @@ strip:SetClipsChildren(true)
 -- without touching the background, edge lines or XP fill.
 local content = CreateFrame("Frame", nil, strip)
 content:SetAllPoints(strip)
-ns.root, ns.strip, ns.content = root, strip, content   -- used by Markers.lua
+ns.root, ns.strip = root, strip   -- used by Markers.lua and Settings.lua
 
 -- Background is four segments (left/right x inner/outer) so the outer part can fade to
 -- transparent over a configurable distance while the inner part keeps its color.
@@ -155,14 +164,15 @@ local function NewScan()
   return t
 end
 local scanPieces = { { NewScan(), bgLin }, { NewScan(), bgRin }, { NewScan(), bgLout }, { NewScan(), bgRout } }
--- Slow downward drift, same speed as the tooltip's. Runs only while scanlines are on and Low-CPU Rendering is off.
+-- Slow downward drift, same speed as the tooltip's. Runs while scanlines are on. It only moves the texture coordinates of four
+-- textures, so Low-CPU Rendering does not stop it; that setting just slows its updates a little.
 local scanOff, scanAcc = 0, 0
 local scanDrift = CreateFrame("Frame")
 scanDrift:SetScript("OnUpdate", function(_, dt)
   local d = db
-  if not d or d.scanlines == false or d.optimize then return end
+  if not d or d.scanlines == false then return end
   scanAcc = scanAcc + dt
-  if scanAcc < 0.03 then return end
+  if scanAcc < (d.optimize and 0.05 or 0.03) then return end
   scanOff = (scanOff + scanAcc * 8 / 4) % 1
   scanAcc = 0
   for _, pc in ipairs(scanPieces) do
@@ -202,6 +212,7 @@ for _, side in ipairs({ "TOP", "BOTTOM" }) do
   edgeSets[side] = set
 end
 
+-- Positions the segments of one edge line (top or bottom) of the bar.
 local function PlaceEdge(segs, side, h, fw, c, a)
   local opp = (side == "TOP") and "BOTTOM" or "TOP"
   local sy = (side == "TOP") and -h or h
@@ -216,6 +227,7 @@ local function PlaceEdge(segs, side, h, fw, c, a)
   for i = 1, 3 do segs[i]:Show() end
 end
 
+-- Shows or hides the top and bottom edge lines and sizes them to the bar.
 function ns.UpdateEdges()
   if not db then return end
   local on = db.edgeLines
@@ -277,6 +289,7 @@ local function Pieces(st)
   return out
 end
 
+-- Paints the XP fill behind the bar in color c for the current fill state.
 local function PaintBackfill(c)
   local st = bfState
   if not st then return end
@@ -306,6 +319,7 @@ local function PaintBackfill(c)
   end
 end
 
+-- Hides every slice of the XP fill.
 local function HideBackfill()
   for side = 1, 2 do
     local t = bf[side]
@@ -315,6 +329,7 @@ local function HideBackfill()
   bfState = nil
 end
 
+-- Sizes and places the XP fill for the current XP; hides it when the XP bar is off or you are at max level.
 local function LayoutBackfill(cur, mx, isMax)
   local W, H = db.width, db.height
   if not db.xpBar or isMax then HideBackfill(); return false end
@@ -417,6 +432,7 @@ local function LayoutBackfill(cur, mx, isMax)
 end
 
 local xpDemo   -- when set, XPInfo reports fake progress: { t = seconds elapsed, nextPulse = fraction }
+-- Level, current XP, XP needed and whether you are at max level (fake values while the demo runs).
 local function XPInfo()
   if xpDemo then return UnitLevel("player"), math.floor(xpDemo.t / 10 * 100000), 100000, false end
   local level, cur, mx = UnitLevel("player"), UnitXP("player"), UnitXPMax("player")
@@ -433,6 +449,7 @@ xpHover:EnableMouse(true)
 xpHover:RegisterForDrag("LeftButton")
 xpHover:Hide()
 
+-- Refreshes the XP bar, its fill and its hover area.
 function ns.UpdateXP()
   if not db then return end
   xpHover:SetShown(db.xpBar)
@@ -455,6 +472,7 @@ local function RGB2HSV(r, g, b)
   end
   return h, (mx == 0) and 0 or d / mx, mx
 end
+-- Converts hue (0-360), saturation and value (0-1) to red, green and blue.
 local function HSV2RGB(h, sat, v)
   local c = v * sat
   local x = c * (1 - abs((h / 60) % 2 - 1))
@@ -493,7 +511,7 @@ end)
 
 local lastLevel, lastXP
 
--- /chud xpdemo: fills the XP bar from 0 to 100% over 10 seconds (pulsing every 10%) so themes can be
+-- /chud debug xpdemo: fills the XP bar from 0 to 100% over 10 seconds (pulsing every 10%) so themes can be
 -- checked without earning XP. Real XP is untouched; the display returns to normal afterwards.
 local demoFrame = CreateFrame("Frame")
 demoFrame:Hide()
@@ -508,23 +526,55 @@ demoFrame:SetScript("OnUpdate", function(self, elapsed)
   end
   ns.UpdateXP()
 end)
+-- Runs a short fake XP gain to preview the XP bar effects.
 function ns.XPDemo()
   if not db then return end
   if not db.xpBar then print("CHUD: turn on the XP bar first (XP Bar + Hover Tooltip)."); return end
   xpDemo = { t = 0, nextPulse = 0.1 }
   demoFrame:Show()
 end
+-- Notices real XP gains and level-ups and starts the matching bar effects.
+-- Monster-kill experience for the tooltip's XP/h line, read from the game's "X dies, you gain N experience" messages so quests,
+-- exploration and other XP are left out. Only the last 10 minutes count.
+local XP_WINDOW = 600
+local kills, sessStart = {}, nil   -- kills = { { time, xp }, ... } oldest first
+local killPattern                  -- the game's own kill message turned into a Lua pattern, so it works in any language
+-- Records the XP from one chat message, if it is a kill.
+local function NoteKillXP(msg)
+  if type(msg) ~= "string" then return end
+  if not killPattern then
+    local fmt = COMBATLOG_XPGAIN_FIRSTPERSON or "%s dies, you gain %d experience."
+    killPattern = "^" .. fmt:gsub("[%^%$%(%)%.%[%]%*%+%-%?]", "%%%0"):gsub("%%%%s", "(.+)"):gsub("%%%%d", "(%%d+)")
+  end
+  local _, xp = msg:match(killPattern)
+  xp = tonumber(xp)
+  if xp and xp > 0 then kills[#kills + 1] = { GetTime(), xp } end
+end
+-- Kill XP per hour over the last 10 minutes (or since the game loaded, if that is shorter), or nil until there is a kill in
+-- that time and at least a minute has passed.
+function ns.XPPerHour()
+  if not sessStart then return nil end
+  local now = GetTime()
+  while kills[1] and now - kills[1][1] > XP_WINDOW do table.remove(kills, 1) end
+  local span = min(XP_WINDOW, now - sessStart)
+  if #kills == 0 or span < 60 then return nil end
+  local sum = 0
+  for i = 1, #kills do sum = sum + kills[i][2] end
+  return sum / span * 3600
+end
+
 local function CheckXPGain()
   if not db then return end
   if xpDemo then return end   -- demo values are fake; never treat them as a real gain
   local level, cur, _, isMax = XPInfo()
+  sessStart = sessStart or GetTime()
   if not isMax and db.xpBar and db.xpPulse and lastXP and (level > lastLevel or (level == lastLevel and cur > lastXP)) then
     pulseT = 0; pulseFrame:Show()
   end
   lastLevel, lastXP = level, cur
 end
 
--- Plays the pulse on demand (used when the option is switched on, and by /chud pulse).
+-- Plays the pulse on demand (used when the option is switched on, and by the XP demo).
 function ns.PreviewXPPulse()
   if db and db.xpBar then pulseT = 0; pulseFrame:Show() end
 end
@@ -560,6 +610,7 @@ local function MakeOutline(parent)
   end
   return o
 end
+-- Sets the same text on all eight outline copies of a label.
 local function SetOutlineText(o, text) for i = 1, 8 do o[i]:SetText(text) end end
 degOut = MakeOutline(contentTop)
 
@@ -599,6 +650,7 @@ local function OutlineFlag()
   if w <= 0 then return "" end
   return w > 1 and "THICKOUTLINE" or "OUTLINE"
 end
+-- Applies font, size, color and alpha to a label.
 local function StyleText(fs, o, size, c)
   SetFontSafe(fs, size, OutlineFlag())
   fs:SetTextColor(c[1], c[2], c[3], 1)
@@ -623,6 +675,7 @@ for i = 1, 5 do
   b:SetColorTexture(1, 1, 1, 1); b:Hide()
   glitchBars[i] = b
 end
+-- Hides the glitch static bars.
 local function HideBars() for i = 1, #glitchBars do glitchBars[i]:Hide() end end
 
 -- Thin horizontal "static" slices at random spots; strength 0..1 is how many show up.
@@ -645,6 +698,7 @@ local function ScatterBars(strength)
   end
 end
 
+-- Shakes the whole bar by up to this many pixels (glitch effect).
 local function Jitter(amount)
   amount = floor(amount)
   local jx, jy = random(-amount, amount), random(-2, 2)
@@ -652,6 +706,7 @@ local function Jitter(amount)
   content:SetPoint("TOPLEFT", strip, "TOPLEFT", jx, jy)
   content:SetPoint("BOTTOMRIGHT", strip, "BOTTOMRIGHT", jx, jy)
 end
+-- Puts the bar content back in place after a jitter.
 local function ResetJitter() content:ClearAllPoints(); content:SetAllPoints(strip) end
 
 -- Random flicker level: fully on with probability pOn, otherwise dim or off.
@@ -662,6 +717,7 @@ local function Flicker(pOn)
   return 0
 end
 
+-- Advances the disable and enable glitch animation by one frame.
 local function FXStep(elapsed)
   fx.t = fx.t + elapsed
   fx.acc = fx.acc + elapsed
@@ -732,6 +788,7 @@ local function FXStep(elapsed)
   end
 end
 
+-- Starts the glitch-out animation when the HUD gets disabled (in a dungeon, say).
 local function StartBreaking()
   fx.mode = db.glitchFx and "breaking" or "fadeout"; fx.t = 0; fx.acc = 0
   content:Show(); contentTop:Show(); content:SetAlpha(1); contentTop:SetAlpha(1)
@@ -739,6 +796,7 @@ local function StartBreaking()
   if db.glitchFx then disabledText:Hide() end
 end
 
+-- Starts the glitch-in animation when the HUD comes back.
 local function StartBooting()
   fx.mode = db.glitchFx and "booting" or "fadein"; fx.t = 0; fx.acc = 0
   HideBars(); ResetJitter()
@@ -746,6 +804,7 @@ local function StartBooting()
   ns.Apply()   -- re-lay out the compass at the current bearing
 end
 
+-- Switches the HUD off with a message, or back on when msg is nil.
 local function SetDisabled(msg)
   if msg == disabledMsg then return end
   local was = disabledMsg
@@ -757,6 +816,7 @@ local function SetDisabled(msg)
   end
 end
 
+-- Works out whether the HUD must be disabled here (dungeons and raids).
 local function UpdateInstance()
   local inInstance, itype = IsInInstance()
   if inInstance and (itype == "party" or itype == "scenario") then instMsg = "HUD Disabled In Dungeons"
@@ -765,6 +825,7 @@ local function UpdateInstance()
   -- instMsg only chooses the wording; OnUpdate disables the compass while facing is missing.
 end
 
+-- Prints what the game reports for the player's facing (a number, or a hidden "secret" value).
 function ns.Debug()
   local f = GetPlayerFacing()
   local secret = issecretvalue and issecretvalue(f)
@@ -793,6 +854,7 @@ local BLIZZ_XP_FRAMES = { "MainMenuExpBar", "MainStatusTrackingBarContainer" }
 local BLIZZ_XP_FALLBACK = { "StatusTrackingBarManager" }
 local blizzHidden, blizzHooked = {}, {}
 
+-- The default Blizzard XP bar frames that exist on this client.
 local function BlizzXPFrames()
   local found = {}
   for _, name in ipairs(BLIZZ_XP_FRAMES) do
@@ -806,6 +868,7 @@ local function BlizzXPFrames()
   return found
 end
 
+-- Hides or shows the default Blizzard XP bar to match the setting.
 function ns.ApplyBlizzXP()
   if not db then return end
   for _, f in ipairs(BlizzXPFrames()) do
@@ -813,17 +876,24 @@ function ns.ApplyBlizzXP()
       if not blizzHooked[f] then
         blizzHooked[f] = true
         -- The game re-shows these bars on level-up and zone changes; hide them again when it does.
-        f:HookScript("OnShow", function(self) if db.hideBlizzXP then self:Hide() end end)
+        f:HookScript("OnShow", function(self) if db.hideBlizzXP then blizzHidden[self] = true; self:Hide() end end)
       end
       if f:IsShown() then blizzHidden[f] = true; f:Hide() end
-    elseif blizzHidden[f] then
+    elseif blizzHidden[f] or blizzHooked[f] then
+      -- Anything this addon ever hid or watched comes back, even if the game (not this code) was the last to hide it.
       blizzHidden[f] = nil
       f:Show()
     end
   end
+  -- The game decides which of its tracking bars show; ask it to redo that so the XP bar returns with the right layout.
+  if not db.hideBlizzXP and StatusTrackingBarManager and StatusTrackingBarManager.UpdateBarsShown then
+    pcall(StatusTrackingBarManager.UpdateBarsShown, StatusTrackingBarManager)
+  end
 end
+-- True when a default XP bar exists on this client.
 function ns.BlizzXPFound() return #BlizzXPFrames() > 0 end
 
+-- Applies every setting to the bar: size, position, fonts, colors and effects.
 function ns.Apply()
   if not db then return end
   ns.ApplyBlizzXP()
@@ -978,6 +1048,7 @@ local DEG = {}
 for i = 0, 359 do DEG[i] = i .. "\194\176" end
 
 local bearing, lastDeg, lastFacing = 0, nil, nil
+-- Lays out the compass (letters, numbers, ticks and marker icons) for the current facing. Runs only when something changed.
 function Layout()
   local half = db.width / 2
   local ppd = db.width / db.span          -- pixels per degree
@@ -1076,6 +1147,7 @@ end)
 
 -- XP tooltip -------------------------------------------------------------------
 local hovered = false
+-- Shows CHUD's own tooltip for the bar, or the game's tooltip when that is switched off.
 local function ShowTooltip()
   -- CHUD's own tooltip (see Tooltip.lua); if it is switched off or fails for any reason, the game's tooltip below is used.
   if db.tipStyle ~= false and ns.TipShow then
@@ -1083,6 +1155,7 @@ local function ShowTooltip()
     if db.xpBar then
       d.level, d.cur, d.mx, d.isMax = XPInfo()
       d.rested = GetXPExhaustion and GetXPExhaustion() or nil
+      d.perHour = ns.XPPerHour()
     end
     local ok, shown = pcall(ns.TipShow, xpHover, d)
     if ok and shown then return end
@@ -1100,6 +1173,9 @@ local function ShowTooltip()
       local rested = GetXPExhaustion and GetXPExhaustion()
       if rested and rested > 0 then
         GameTooltip:AddDoubleLine("Rested", format("%s (%.1f%%)", BreakUpLargeNumbers(rested), rested / mx * 100), 1, 1, 1, 0.3, 0.6, 1)
+      else
+        local ph = ns.XPPerHour()
+        GameTooltip:AddDoubleLine("XP/h", ph and BreakUpLargeNumbers(floor(ph + 0.5)) or "--", 1, 1, 1, 0.3, 0.6, 1)
       end
     end
   end
@@ -1125,12 +1201,14 @@ root:SetScript("OnLeave", function() GameTooltip:Hide() end)
 -- one-off flags such as numbersReset; a full reset wiped those flags and the migration then ran
 -- again on the next login, overwriting settings the user had chosen since.)
 local SCHEMA = 2
+local SETUP_VERSION = "1.0"   -- saved data from before this release is cleared once at load (see ADDON_LOADED); raise it to force that again
 local OBSOLETE = {   -- settings that no longer exist
   "textOutline", "numbersReset", "outlineReset", "xpFlip", "xpHeight", "xpTicks", "xpBackfill",
-  "mk_outline", "mk_outlineColor", "mk_shadow",
+  "mk_outline", "mk_outlineColor", "mk_shadow", "fadeMoving",
 }
 local FILL_STYLES = { fadeCenter = true, fadeBottom = true, fadeTop = true, band = true, full = true }
 
+-- Brings older saved settings up to the current schema and drops obsolete keys.
 function ns.MigrateSavedVariables(d)
   if d.numbersReset and d.outlineReset then d.schema = d.schema or 1 end   -- those one-off resets already ran
   if (d.schema or 0) < 1 then
@@ -1150,10 +1228,12 @@ local ev = CreateFrame("Frame")
 ev:RegisterEvent("ADDON_LOADED")
 ev:RegisterEvent("PLAYER_XP_UPDATE")
 ev:RegisterEvent("UPDATE_EXHAUSTION")
+ev:RegisterEvent("CHAT_MSG_COMBAT_XP_GAIN")
 ev:RegisterEvent("PLAYER_LEVEL_UP")
 ev:RegisterEvent("PLAYER_ENTERING_WORLD")
 ev:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 ev:SetScript("OnEvent", function(_, event, name)
+  if event == "CHAT_MSG_COMBAT_XP_GAIN" then NoteKillXP(name); return end   -- name is the chat message here
   if event ~= "ADDON_LOADED" then
     if db then CheckXPGain(); ns.UpdateXP(); UpdateInstance() end
     if event == "PLAYER_ENTERING_WORLD" then ns.ApplyBlizzXP() end   -- Blizzard's bar can be created after our load
@@ -1168,17 +1248,31 @@ ev:SetScript("OnEvent", function(_, event, name)
     if db[k] == nil then db[k] = Copy(v) end
   end
   ns.MigrateSavedVariables(db)
+  -- Release 1.0 starts everyone from a fresh install: saved settings and imported data from any earlier version are cleared once
+  -- and the setup tour runs. Saved themes, recorded gathering spots and the game settings Highlight Node must give back survive.
+  if db.setupVersion ~= SETUP_VERSION then
+    local themes, nodes, hlSaved = db.themes, db.nodes, db.hlSaved
+    for k in pairs(db) do db[k] = nil end
+    for k, v in pairs(ns.defaults) do db[k] = Copy(v) end
+    db.themes, db.nodes, db.hlSaved = themes or {}, nodes or {}, hlSaved
+    db.schema = SCHEMA
+    db.setupVersion = SETUP_VERSION
+  end
   ns.db = db
   if ns.BuildSettings then ns.BuildSettings() end
   ns.Apply()
 end)
 
+-- Resets every setting to its default. Saved themes and recorded gathering spots are kept.
 function ns.Reset()
-  local themes, nodes = db.themes, db.nodes   -- saved themes and recorded gathering spots survive a full reset
+  -- saved themes, recorded gathering spots, the imported gathering data and the game settings Highlight.lua must give back
+  -- all survive a full reset
+  local themes, nodes, gdata, hlSaved, tourDone, setupVersion = db.themes, db.nodes, db.gdata, db.hlSaved, db.tourDone, db.setupVersion
   for k in pairs(db) do db[k] = nil end
   for k, v in pairs(ns.defaults) do db[k] = Copy(v) end
   db.themes = themes or {}
   db.nodes = nodes or {}
+  db.gdata, db.hlSaved, db.tourDone, db.setupVersion = gdata, hlSaved, tourDone, setupVersion
   db.schema = SCHEMA
   ns.Apply()
   if ns.RefreshSettings then ns.RefreshSettings() end
@@ -1190,13 +1284,16 @@ local COLOR_KEYS = { "bgMode", "bgOpacity", "bgSolid", "bgCenter", "bgEdge", "te
 local BEHAVIOR_KEYS = { "width", "height", "span", "fontSize", "fadeEdges", "fadeAmount",
   "showDegrees", "degreeInline", "showIntercardinals", "showTicks", "flipTicks", "xpBar", "xpPulse", "markerStyle", "outlineWidth", "showNumbers", "edgeLines", "xpFillMode", "xpFillStyle", "xpFillStrength", "mk_size", "mk_shadowAlpha", "mk_shadowDist", "mk_native", "locked", "fontName", "fontPath", "optimize", "glitchFx" }
 ns.COLOR_KEYS, ns.BEHAVIOR_KEYS = COLOR_KEYS, BEHAVIOR_KEYS   -- used by Themes.lua
+-- Resets just the listed settings to their defaults.
 local function ResetKeys(keys)
   for _, k in ipairs(keys) do db[k] = Copy(ns.defaults[k]) end
   ns.Apply()
   if ns.RefreshSettings then ns.RefreshSettings() end
 end
 local TIP_KEYS = { "tipAuto", "tipBg", "tipEdge", "tipAccent", "tipTitle", "tipText", "tipGood", "tipRest" }
+-- Resets the color settings to their defaults.
 function ns.ResetColors() ResetKeys(TIP_KEYS); ResetKeys(COLOR_KEYS) end
+-- Resets the behavior settings to their defaults.
 function ns.ResetBehavior() ResetKeys({ "scanlines" }); ResetKeys(BEHAVIOR_KEYS) end
 
 -- Position-only resets (leave every other setting alone).
@@ -1205,6 +1302,7 @@ function ns.CenterHorizontal()
   ns.Apply()
   if ns.RefreshSettings then ns.RefreshSettings() end
 end
+-- Puts the bar back at its default position.
 function ns.ResetPosition()
   db.x, db.y = ns.defaults.x, ns.defaults.y
   ns.Apply()
@@ -1212,10 +1310,11 @@ function ns.ResetPosition()
 end
 
 -- Diagnostic output capture ------------------------------------------------------------------------------
--- Test commands (debug, markers, probe, perf) still print to chat, and the same lines are kept in CHUDLog.
+-- Diagnostics (/chud debug) still print to chat, and the same lines are kept in CHUDLog.
 -- WoW cannot write files directly: the saved copy is written to CHUDLog.lua in the SavedVariables folder
--- (WTF\Account\<account>\SavedVariables) after /reload or logout. "/chud log" shows the same text in a copyable window.
+-- (WTF\Account\<account>\SavedVariables) after /reload or logout. "/chud debug" shows the same text in a copyable window.
 local LOG_KEEP = 30
+-- Runs fn and collects everything it prints into the log window instead of chat.
 local function Capture(cmd, fn)
   local lines, old = {}, print
   print = function(...)
@@ -1234,6 +1333,7 @@ local function Capture(cmd, fn)
 end
 
 local logFrame
+-- Shows the log window, a text box whose contents can be copied.
 function ns.ShowLog()
   if not logFrame then
     local f = CreateFrame("Frame", "CHUDLogFrame", UIParent, "BasicFrameTemplateWithInset")
@@ -1257,29 +1357,56 @@ function ns.ShowLog()
     for _, l in ipairs(run.lines) do out[#out + 1] = l end
     out[#out + 1] = ""
   end
-  logFrame.edit:SetText(#out > 0 and table.concat(out, "\n") or "Nothing logged yet. Run /chud probe, /chud markers, /chud debug or /chud perf.")
+  logFrame.edit:SetText(#out > 0 and table.concat(out, "\n") or "Nothing logged yet. Run /chud debug.")
   logFrame:Show()
   logFrame.edit:SetFocus(); logFrame.edit:HighlightText()
+end
+
+-- Slash commands. Listed for players: /chud (settings), unlock, lock, center, reset, install (the setup tour).
+-- Not listed anywhere in the UI: /chud menu (the marker menu, a way back in when the right-click menu is off) and
+-- /chud debug, which runs every diagnostic and shows the combined log in a copyable window. A single one can be run with
+-- /chud debug <facing | probe | markers | gm | soft | log | clear | xpdemo | perf>.
+local DEBUG = {
+  { "facing", function() return ns.Debug end },
+  { "probe", function() return ns.Probe end },
+  { "markers", function() return ns.MarkerDebug end },
+  { "gm", function() return ns.GMProbe end },
+  { "soft", function() return ns.SoftProbe end },
+}
+local function RunDebug(which)
+  if which == "" then
+    for _, d in ipairs(DEBUG) do
+      local fn = d[2]()
+      if fn then Capture("debug " .. d[1], fn) end
+    end
+    ns.ShowLog()
+    return
+  end
+  for _, d in ipairs(DEBUG) do
+    if d[1] == which then
+      local fn = d[2]()
+      if fn then Capture("debug " .. which, fn) end
+      return
+    end
+  end
+  if which == "log" then ns.ShowLog()
+  elseif which == "clear" then _G.CHUDLog = {}; print("CHUD: log cleared")
+  elseif which == "xpdemo" then ns.XPDemo()
+  elseif which == "perf" then Capture("debug perf", ns.PerfToggle)
+  end
 end
 
 SLASH_CHUD1 = "/chud"
 SlashCmdList.CHUD = function(msg)
   msg = strlower(strtrim(msg or ""))
-  if msg == "unlock" then db.locked = false; ns.Apply()
-  elseif msg == "lock" then db.locked = true; ns.Apply()
-  elseif msg == "debug" then Capture(msg, ns.Debug)
-  elseif msg == "markers" then if ns.MarkerDebug then Capture(msg, ns.MarkerDebug) end
-  elseif msg == "probe" then if ns.Probe then Capture(msg, ns.Probe) end
-  elseif msg == "log" then ns.ShowLog()
-  elseif msg == "log clear" then _G.CHUDLog = {}; print("CHUD: log cleared")
-  elseif msg == "menu" then if ns.ToggleMarkerMenu then ns.ToggleMarkerMenu() end
-  elseif msg == "xpdemo" then ns.XPDemo()
-  elseif msg == "perf" then Capture(msg, ns.PerfToggle)
-  elseif msg == "center" then ns.CenterHorizontal()
-  elseif msg == "resetpos" then ns.ResetPosition()
-  elseif msg == "resetcolors" then ns.ResetColors()
-  elseif msg == "resetbehavior" then ns.ResetBehavior()
-  elseif msg == "reset" then ns.Reset()
+  local cmd, rest = msg:match("^(%S*)%s*(.-)$")
+  if cmd == "unlock" then db.locked = false; ns.Apply()
+  elseif cmd == "lock" then db.locked = true; ns.Apply()
+  elseif cmd == "center" then ns.CenterHorizontal()
+  elseif cmd == "reset" then ns.Reset()
+  elseif cmd == "install" then if ns.RerunSetup then ns.RerunSetup() end
+  elseif cmd == "menu" then if ns.ToggleMarkerMenu then ns.ToggleMarkerMenu() end
+  elseif cmd == "debug" then RunDebug(rest)
   elseif ns.categoryID then Settings.OpenToCategory(ns.categoryID)
   end
   if ns.RefreshSettings then ns.RefreshSettings() end

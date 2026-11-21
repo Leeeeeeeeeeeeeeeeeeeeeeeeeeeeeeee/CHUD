@@ -1,6 +1,6 @@
 local ADDON, ns = ...
 
--- Custom XP tooltip. The effects panel that controls it (/chud tip) is in Settings.lua.
+-- Custom XP tooltip. The settings that control it are in Settings.lua.
 --
 -- This is CHUD's own frame. The game's GameTooltip is never restyled, so other addons' tooltips are untouched.
 -- Every effect runs from one OnUpdate on the tooltip frame, which only runs while the tooltip is on screen.
@@ -22,55 +22,18 @@ local DEFAULTS = {
   glowAlpha = 0.50, shadeAlpha = 0.45, scanAlpha = 0.30, scanSpeed = 8, bracketAlpha = 0.80,
   scale = 1, borderStyle = 2, sampleXP = 0.37,
 }
-ns.TipDefaults = DEFAULTS
 
--- How the border draws itself. The settings panel has a button that cycles through these.
-ns.TipBorderStyles = {
-  "Sweep (top and bottom, right edge waits)",
-  "Center Out (all four edges at once)",
-  "Trace (top to bottom)",
-}
-
--- The effects, in the order the panel lists them. Each has one to three sliders:
--- { saved key, label, min, max, step, format }  where format is "s" seconds, "px" pixels, "px1" pixels with a decimal,
--- "x" speed multiplier, "pxs" pixels per second or "pct" percent.
-ns.TipEffects = {
-  { key = "slide",   name = "Slide-In",        desc = "Rises out from the bar while fading in.",
-    sliders = { { "slideDur", "Duration", 0.1, 2.0, 0.05, "s" }, { "slideDist", "Distance", 0, 80, 1, "px" } } },
-  { key = "grow",    name = "Grow",            desc = "Opens downward from the bar edge, like a drawer.",
-    sliders = { { "growDur", "Duration", 0.1, 2.0, 0.05, "s" } } },
-  { key = "lines",   name = "Hairline Draw-In", desc = "The border draws itself. Use the button below to try three ways of doing it.",
-    sliders = { { "linesDur", "Duration", 0.1, 2.0, 0.05, "s" } } },
-  { key = "fill",    name = "XP Bar Fill",     desc = "The bar grows from empty to your current XP.",
-    sliders = { { "fillDur", "Duration", 0.1, 3.0, 0.05, "s" } } },
-  { key = "shimmer", name = "Rested Shimmer",  desc = "A soft highlight sweeps across rested XP (only shows when you have rested XP).",
-    sliders = { { "shimmerSpeed", "Speed", 0.2, 3, 0.1, "x" } } },
-  { key = "pulse",   name = "Accent Line Pulse", desc = "The colored lines on the left and right edges breathe.",
-    sliders = { { "pulseSpeed", "Speed", 0.2, 3, 0.1, "x" } } },
-  { key = "spin",    name = "Rotating Star",   desc = "A star beside the level. It turns faster, and starts to shake, as you near a level up.",
-    sliders = { { "spinSpeed", "Base Speed", 0.1, 3, 0.1, "x" }, { "spinRamp", "Speed At Level-Up", 1, 10, 0.5, "x" },
-                { "spinShake", "Shake At Level-Up", 0, 4, 0.1, "px1" } } },
-  { key = "ring",    name = "Rotating Ring",   desc = "An image of a ring turning around the star. It speeds up with the star.",
-    sliders = { { "ringSpeed", "Base Speed", 0.1, 3, 0.1, "x" } } },
-  { key = "glow",    name = "Soft Glow",       desc = "An image of a soft halo in the accent color behind the tooltip.",
-    sliders = { { "glowAlpha", "Strength", 0.05, 1, 0.05, "pct" } } },
-  { key = "shade",   name = "Header Shade",    desc = "A soft dark gradient behind the level and bar, for depth.",
-    sliders = { { "shadeAlpha", "Opacity", 0.05, 1, 0.05, "pct" } } },
-  { key = "scan",    name = "Scanlines",       desc = "Thin horizontal lines inside the borders that drift slowly downward.",
-    sliders = { { "scanAlpha", "Opacity", 0.05, 0.8, 0.05, "pct" }, { "scanSpeed", "Drift", 0, 40, 1, "pxs" } } },
-  { key = "brackets", name = "Corner Brackets", desc = "Small image brackets in the four corners.",
-    sliders = { { "bracketAlpha", "Opacity", 0.1, 1, 0.05, "pct" } } },
-}
 -- Effects that are a look rather than motion: they ignore the master animation switch and do not replay the sample.
 local STILL = { glow = true, shade = true, scan = true, brackets = true }
-ns.TipStill = STILL
 
+-- A tooltip effect setting, falling back to its default.
 local function P(key)
   local db = ns.db
   local v = db and db.tipP and db.tipP[key]
   if v == nil then return DEFAULTS[key] end
   return v
 end
+-- True when this tooltip effect is switched on.
 local function FX(key)
   local db = ns.db
   if not db then return false end
@@ -82,6 +45,7 @@ end
 
 -- Easing -----------------------------------------------------------------------------------------
 local function Clamp01(x) if x < 0 then return 0 elseif x > 1 then return 1 end return x end
+-- Easing curves: each takes progress 0-1 and returns the eased value 0-1.
 local function EaseOutExpo(x) x = Clamp01(x); if x >= 1 then return 1 end return 1 - 2 ^ (-10 * x) end
 local function EaseOutCubic(x) x = Clamp01(x); return 1 - (1 - x) ^ 3 end
 local function EaseInOutExpo(x)
@@ -94,6 +58,7 @@ end
 -- Frame ------------------------------------------------------------------------------------------
 local tip
 
+-- Applies the chosen font, size and outline to a tooltip label.
 local function SetFont(fs, size)
   local db = ns.db
   local path = (db and db.fontPath and db.fontPath ~= "") and db.fontPath or STANDARD_TEXT_FONT
@@ -101,6 +66,7 @@ local function SetFont(fs, size)
   if not fs:SetFont(path, size, flag) then fs:SetFont(STANDARD_TEXT_FONT, size, flag) end
 end
 
+-- Creates a tooltip label.
 local function Text(parent, justify)
   local fs = parent:CreateFontString(nil, "OVERLAY")
   fs:SetJustifyH(justify or "LEFT")
@@ -109,6 +75,7 @@ end
 
 local STAR_X, STAR_Y = -(PAD + 6), -19   -- the star and ring sit here (center, from the content's top right); the level and percent line up with it
 
+-- Builds the tooltip frame and all its parts (created on first use).
 local function Build()
   local f = CreateFrame("Frame", "CHUDTip", UIParent)
   f:SetFrameStrata("TOOLTIP"); f:SetClampedToScreen(true); f:Hide()
@@ -221,6 +188,7 @@ local function Place(f, slide)
   f:SetPoint(a.point, a.owner, a.rel, a.x / s, (a.y - a.dir * slide) / s)
 end
 
+-- Per-frame update of the tooltip's animation and its hide delay.
 function ns.TipUpdate(f, dt)
   -- A short grace period after the mouse leaves: moving across a marker icon leaves and re-enters the bar
   -- within a moment, and that should not restart the animation.
@@ -329,12 +297,14 @@ end
 -- By default the tooltip colors follow the current theme. Every text color is nudged toward white or black
 -- until it reads clearly on the tooltip's own background, so light themes get dark value colors.
 local function Chan(v) if v <= 0.03928 then return v / 12.92 end return ((v + 0.055) / 1.055) ^ 2.4 end
+-- Relative luminance of a color, and the contrast ratio between two colors.
 local function Lum(c) return 0.2126 * Chan(c[1]) + 0.7152 * Chan(c[2]) + 0.0722 * Chan(c[3]) end
 local function Ratio(a, b)
   local x, y = Lum(a), Lum(b)
   if x < y then x, y = y, x end
   return (x + 0.05) / (y + 0.05)
 end
+-- Nudges a color toward black or white until it has enough contrast against bg.
 local function Ensure(c, bg, want)
   local r = { c[1], c[2], c[3], c[4] or 1 }
   if Ratio(r, bg) >= want then return r end
@@ -346,7 +316,9 @@ local function Ensure(c, bg, want)
   end
   return { target, target, target, c[4] or 1 }
 end
+-- Blends two colors: f = 0 gives a, f = 1 gives b.
 local function Mix(a, b, f) return { a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f, a[3] + (b[3] - a[3]) * f, 1 } end
+-- Picks readable tooltip text colors for the current background.
 function ns.TipAutoColors()
   local db = ns.db
   local bgc = (db.bgMode == "solid") and db.bgSolid or db.bgCenter
@@ -362,6 +334,7 @@ function ns.TipAutoColors()
     rest = Ensure(Mix(db.xpColor, { 1, 1, 1 }, 0.25), bg, 4.5),
   }
 end
+-- The tooltip's colors: automatic, or the player's own.
 local function Colors()
   local db = ns.db
   local c
@@ -448,6 +421,9 @@ function ns.TipShow(owner, d, point, restart, preview)
       rows[#rows + 1] = { "Remaining", BreakUpLargeNumbers(d.mx - d.cur), K.good[1], K.good[2], K.good[3] }
       if rested then
         rows[#rows + 1] = { "Rested", format("%s (%.1f%%)", BreakUpLargeNumbers(d.rested), d.rested / d.mx * 100), K.rest[1], K.rest[2], K.rest[3] }
+      else
+        -- With no rested XP left, the line shows how fast XP is coming in this session instead.
+        rows[#rows + 1] = { "XP/h", d.perHour and BreakUpLargeNumbers(floor(d.perHour + 0.5)) or "--", K.rest[1], K.rest[2], K.rest[3] }
       end
     end
   else
@@ -510,8 +486,6 @@ function ns.TipHide(now)
   if tip.previewMode and not now then return end
   if now then tip.pendingHide = nil; tip.hideAt = GetTime(); tip:Hide() else tip.pendingHide = 0.12 end
 end
-
-function ns.TipIsShown() return tip and tip:IsShown() end
 
 -- A sample tooltip for the effects panel, shown exactly where the real one appears (under or over the bar).
 -- Uses your real level and rested XP; the XP progress is the panel's "Sample XP" slider so the level-up speed-up and

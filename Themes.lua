@@ -2,14 +2,14 @@ local ADDON, ns = ...
 
 -- A theme is a snapshot of the "look": every color and layout/behavior key, except things
 -- that are not part of a look (position, width, lock state, the CPU setting, the themes list itself).
-local EXCLUDE = { locked = true, optimize = true, glitchFx = true, xpPulse = true, width = true }
+-- (mk_native, Original Icon Colors, is a preference like those: picking a theme must not switch it, and it must not stop a theme matching.)
+local EXCLUDE = { locked = true, optimize = true, glitchFx = true, xpPulse = true, width = true, mk_native = true }
 local KEYS = {}
 for _, list in ipairs({ ns.COLOR_KEYS, ns.BEHAVIOR_KEYS }) do
   for _, k in ipairs(list) do
     if not EXCLUDE[k] then KEYS[#KEYS + 1] = k end
   end
 end
-ns.THEME_KEYS = KEYS
 
 -- Palettes ---------------------------------------------------------------------------------
 -- A theme is described by a few colors; everything else is derived so themes stay consistent:
@@ -69,6 +69,7 @@ local FACTION = {
   Neutral = Palette({ bg = { 0.08, 0.08, 0.10 }, alpha = 0.88, accent = { 1.00, 0.82, 0.00 },
     text = { 0.95, 0.95, 0.95 }, north = WARM_WHITE, xp = { 0.58, 0.00, 0.55 } }),
 }
+-- Sets the default accent colors from your faction (Alliance, Horde or neutral).
 function ns.ApplyFactionDefaults()
   local faction = UnitFactionGroup and UnitFactionGroup("player")
   local pal = FACTION[faction] or FACTION.Neutral
@@ -78,11 +79,12 @@ end
 -- Built-in themes (cannot be deleted). Default is empty: it is the faction-aware defaults.
 ns.BuiltinNames = { "Default", "Dark", "High Contrast", "Assassins", "Alliance", "Horde", "UNSC", "Nordic", "Azeroth", "Pink",
   "Tactical", "Tactical Minimal", "Frost", "Frost Minimal", "Ember", "Ember Minimal",
-  "Catppuccin", "Tokyo Night" }
+  "Catppuccin", "Tokyo Night", "Rose Pine", "Gruvbox", "Dracula", "Kanagawa", "Everforest", "Synthwave" }
 
 -- Fonts that ship with the game, so themes can use them without any other addon.
 local ARIAL    = { fontName = "Arial Narrow",  fontPath = "Fonts\\ARIALN.TTF" }
 local MORPHEUS = { fontName = "Morpheus",      fontPath = "Fonts\\MORPHEUS.ttf" }
+-- Copies the font settings into a theme table and returns it.
 local function With(font, t) for k, v in pairs(font) do t[k] = v end return t end
 
 -- Each theme pairs a palette with a different mix of features:
@@ -115,7 +117,7 @@ local BUILTIN = {
     text = { 0.90, 0.93, 1.00 }, north = { 1, 1, 1 }, xp = { 0.20, 0.45, 0.95 } },
     { span = 150, fadeAmount = 0.40, outlineWidth = 1, outlineColor = { 0.02, 0.05, 0.15, 1 } }),
   Horde = Theme({ bg = { 0.25, 0.04, 0.04 }, accent = { 0.96, 0.32, 0.24 },
-    text = { 0.95, 0.85, 0.80 }, north = { 1.00, 0.75, 0.20 }, xp = { 0.75, 0.10, 0.10 } },
+    text = { 0.95, 0.85, 0.80 }, north = { 1.00, 0.75, 0.20 }, xp = { 0.92, 0.22, 0.16 } },
     { flipTicks = true, markerStyle = "notch", outlineWidth = 1, outlineColor = { 0.12, 0.02, 0.02, 1 } }),
   UNSC = Theme({ bg = { 0.08, 0.10, 0.07 }, accent = { 1.00, 0.72, 0.15 },
     text = { 0.78, 0.85, 0.70 }, north = { 1.00, 0.40, 0.15 }, xp = { 0.55, 0.78, 0.30 } },
@@ -155,6 +157,29 @@ BUILTIN["Tokyo Night"] = Theme({ bg = { 0.102, 0.106, 0.149 }, accent = { 0.478,
   text = { 0.753, 0.792, 0.961 }, north = { 0.969, 0.463, 0.557 }, xp = { 0.733, 0.604, 0.969 } },
   { fadeAmount = 0.50, showDegrees = true, outlineWidth = 1, outlineColor = { 0.04, 0.04, 0.08, 1 } })
 
+-- More palettes from the editor and terminal themes people use most (Rose Pine, Gruvbox, Dracula, Kanagawa, Everforest), plus
+-- an original retro-neon one. As with Catppuccin and Tokyo Night, only the published colors are borrowed. Each one also gets a
+-- different layout, so switching themes changes more than the tint.
+local function Hex(h) return { tonumber(h:sub(1, 2), 16) / 255, tonumber(h:sub(3, 4), 16) / 255, tonumber(h:sub(5, 6), 16) / 255 } end
+local function WithAlpha(c, a) return { c[1], c[2], c[3], a } end
+BUILTIN["Rose Pine"] = Theme({ bg = Hex("191724"), accent = Hex("f6c177"), text = Hex("e0def4"), north = Hex("eb6f92"), xp = Hex("9ccfd8") },
+  { fadeAmount = 0.70, markerStyle = "notch", outlineWidth = 1, outlineColor = { 0.06, 0.05, 0.10, 1 } })
+BUILTIN.Gruvbox = Theme({ bg = Hex("282828"), accent = Hex("fe8019"), text = Hex("ebdbb2"), north = Hex("fb4934"), xp = Hex("b8bb26") },
+  { bgMode = "solid", bgSolid = WithAlpha(Hex("282828"), 0.92), fadeEdges = true, fadeAmount = 0.25, height = 36, fontSize = 15,
+    showDegrees = true, showNumbers = true, outlineWidth = 1, outlineColor = { 0.10, 0.10, 0.10, 1 } })
+BUILTIN.Dracula = Theme({ bg = Hex("282a36"), accent = Hex("bd93f9"), text = Hex("f8f8f2"), north = Hex("ff5555"), xp = Hex("50fa7b") },
+  { bgMode = "solid", bgSolid = WithAlpha(Hex("282a36"), 0.92), fadeAmount = 0.35, markerStyle = "notch", span = 160,
+    outlineWidth = 1, outlineColor = { 0.10, 0.10, 0.14, 1 } })
+BUILTIN.Kanagawa = Theme({ bg = Hex("1f1f28"), accent = Hex("e6c384"), text = Hex("dcd7ba"), north = Hex("e46876"), xp = Hex("7e9cd8") },
+  With(ARIAL, { span = 200, fadeAmount = 0.60, showIntercardinals = false, outlineWidth = 1, outlineColor = { 0.05, 0.05, 0.08, 1 } }))
+BUILTIN.Everforest = Theme({ bg = Hex("2d353b"), accent = Hex("a7c080"), text = Hex("d3c6aa"), north = Hex("e67e80"), xp = Hex("dbbc7f") },
+  { bgMode = "solid", bgSolid = WithAlpha(Hex("2d353b"), 0.88), fadeEdges = true, fadeAmount = 0.50, height = 34,
+    showTicks = true, showDegrees = false, outlineWidth = 1, outlineColor = { 0.08, 0.10, 0.11, 1 } })
+BUILTIN.Synthwave = Theme({ bg = Hex("140a2a"), accent = Hex("ff2e97"), marker = Hex("00e5ff"), text = Hex("c8f4ff"), north = Hex("ffe14d"),
+  xp = Hex("00e5ff") },
+  { height = 38, fontSize = 15, span = 200, flipTicks = true, showDegrees = true, markerStyle = "notch", mk_size = 17,
+    outlineWidth = 1, outlineColor = { 0.05, 0.02, 0.12, 1 } })
+
 -- Daylight is a toggle, not a theme: while it is on, the colors follow the game's clock in half-hour steps and the color
 -- controls are locked. Turning it off puts back the colors the player had. Each keyframe is { hour, bg, accent, text,
 -- north, xp }; the half-hour in between is blended from its two neighbours.
@@ -168,6 +193,7 @@ local DAY = {
   { 22.0, { 0.05, 0.06, 0.14 }, { 0.60, 0.65, 1.00 }, { 0.82, 0.86, 0.98 }, { 0.95, 0.55, 0.60 }, { 0.40, 0.45, 0.90 } },  -- night
   { 24.0, { 0.03, 0.04, 0.10 }, { 0.55, 0.62, 0.95 }, { 0.80, 0.84, 0.95 }, { 0.95, 0.55, 0.60 }, { 0.35, 0.40, 0.85 } },  -- midnight again
 }
+-- Blends two colors: f = 0 gives a, f = 1 gives b.
 local function Mix(a, b, f)
   return { a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f, a[3] + (b[3] - a[3]) * f }
 end
@@ -180,6 +206,7 @@ local function DayBucket()
   end
   return h * 2 + (m >= 30 and 1 or 0)
 end
+-- The palette for one half-hour of the game day, blended between the day cycle's colors.
 local function DaylightPalette(bucket)
   local t = bucket / 2
   local a, b = DAY[1], DAY[#DAY]
@@ -191,16 +218,17 @@ local function DaylightPalette(bucket)
     north = Mix(a[5], b[5], f), xp = Mix(a[6], b[6], f) })
 end
 
--- Daylight changes colors only. Icon color (mk_color) is left alone: it has its own control in the marker menu.
+-- Daylight changes colors only, the marker icon color included (it takes the palette's accent, like a theme does). Turning
+-- Daylight off puts back every color it replaced.
 local function ApplyDaylightColors()
   local bucket = DayBucket()
-  for k, v in pairs(DaylightPalette(bucket)) do
-    if k ~= "mk_color" then ns.db[k] = v end
-  end
+  for k, v in pairs(DaylightPalette(bucket)) do ns.db[k] = v end
   ns.db.dayBucket = bucket
 end
 
+-- True when the day and night color cycle is on.
 function ns.DaylightOn() return ns.db and ns.db.daylight == true end
+-- Turns the day and night color cycle on or off.
 function ns.SetDaylight(on)
   local db = ns.db
   if on and not db.daylight then
@@ -216,6 +244,7 @@ function ns.SetDaylight(on)
   if ns.RefreshSettings then ns.RefreshSettings() end
 end
 
+-- Deep comparison of two values.
 local function Equal(a, b)
   if type(a) == "table" and type(b) == "table" then
     for k, v in pairs(a) do if not Equal(v, b[k]) then return false end end
@@ -227,6 +256,7 @@ local function Equal(a, b)
   return a == b
 end
 
+-- True for the built-in themes, which cannot be deleted.
 function ns.IsBuiltin(name) return BUILTIN[name] ~= nil end
 
 -- Full key set for a theme. Missing keys fall back to defaults, so themes saved by an older
@@ -243,6 +273,7 @@ function ns.GetThemeData(name)
   return data
 end
 
+-- The names of your saved themes, sorted.
 function ns.UserThemeNames()
   local names = {}
   for n in pairs(ns.db.themes or {}) do names[#names + 1] = n end
@@ -250,6 +281,7 @@ function ns.UserThemeNames()
   return names
 end
 
+-- A copy of the current value of every theme setting.
 function ns.SnapshotTheme()
   local snap = {}
   for _, k in ipairs(KEYS) do snap[k] = ns.Copy(ns.db[k]) end
@@ -268,6 +300,7 @@ function ns.MatchTheme()
   return nil
 end
 
+-- Applies a built-in or saved theme by name.
 function ns.ApplyTheme(name)
   local data = ns.GetThemeData(name)
   if not data then return end
@@ -277,12 +310,14 @@ function ns.ApplyTheme(name)
   if ns.RefreshSettings then ns.RefreshSettings() end
 end
 
+-- Saves the current look as a theme with this name.
 function ns.SaveTheme(name)
   ns.db.themes = ns.db.themes or {}
   ns.db.themes[name] = ns.SnapshotTheme()
   if ns.OnSettingsChanged then ns.OnSettingsChanged() end
 end
 
+-- Deletes a saved theme. Built-in themes are protected.
 function ns.DeleteTheme(name)
   if BUILTIN[name] then return end            -- built-ins are protected
   if ns.db.themes then ns.db.themes[name] = nil end

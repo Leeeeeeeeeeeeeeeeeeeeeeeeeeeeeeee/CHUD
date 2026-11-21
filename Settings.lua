@@ -1,6 +1,7 @@
 local ADDON, ns = ...
 
 local refreshers = {}
+-- Re-reads every control from the saved settings. An error in one control is reported but does not stop the rest.
 local function Refresh()
   for _, f in ipairs(refreshers) do
     local ok, err = pcall(f)
@@ -19,12 +20,14 @@ local function Label(parent, text, x, y, template)
   return fs
 end
 
+-- A section heading with a thin rule under it.
 local function Header(parent, text, x, y, w)
   Label(parent, text, x, y, "GameFontNormalLarge")
   local line = parent:CreateTexture(nil, "ARTWORK")
   line:SetPoint("TOPLEFT", x, y - 22); line:SetSize(w, 1); line:SetColorTexture(unpack(RULE))
 end
 
+-- A checkbox with a label. get and set read and write the setting; Dim(true) greys it out.
 local function Check(parent, text, x, y, get, set)
   local b = CreateFrame("CheckButton", nil, parent)
   b:SetSize(18, 18); b:SetPoint("TOPLEFT", x + 2, y - 2)
@@ -47,12 +50,27 @@ local function Check(parent, text, x, y, get, set)
   return b
 end
 
+-- A standard button.
 local function Button(parent, text, x, y, w, fn)
   local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
   btn:SetSize(w, 24); btn:SetPoint("TOPLEFT", x, y); btn:SetText(text)
   btn:SetScript("OnClick", fn)
   return btn
 end
+
+-- Plain hover tooltip for a control: a white title and a wrapped grey explanation.
+local function HoverTip(w, title, body, anchor)
+  w:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, anchor or "ANCHOR_RIGHT")
+    GameTooltip:SetText(title, 1, 1, 1)
+    GameTooltip:AddLine(body, 0.8, 0.8, 0.8, true)
+    GameTooltip:Show()
+  end)
+  w:SetScript("OnLeave", function() GameTooltip:Hide() end)
+end
+
+-- Shared with the setup tour.
+ns.UI = { Label = Label, Header = Header, Check = Check, Button = Button, Tip = HoverTip, BORDER = BORDER, RULE = RULE }
 
 -- Slider with optional title above it. When `editable`, the value sits in a box: click the box,
 -- type a number and press Enter. `scale` is 100 for percent sliders (typed 55 = 0.55).
@@ -149,10 +167,25 @@ local function Slider(parent, text, x, y, width, minv, maxv, step, get, set, fmt
   return s
 end
 
+-- Value formatters for sliders: a whole number, pixels and a percent.
 local function Plain(v) return format("%d", v) end
 local function Px(v) return format("%.1f px", v) end
 local function Pct(v) return format("%d%%", v * 100 + 0.5) end
 
+-- What each color setting colors, shown when you hover its swatch.
+local COLOR_TIPS = {
+  bgSolid = "The flat plate behind the bar. Used when the background is Solid.",
+  bgCenter = "The color in the middle of the background. Used when the background is Gradient.",
+  bgEdge = "The color at the left and right ends of the background. Used when the background is Gradient.",
+  textColor = "The color of the number labels and other text on the bar.",
+  cardinalColor = "The color of the E, S and W letters.",
+  northColor = "The color of the N letter.",
+  tickColor = "The color of the tick marks.",
+  markerColor = "The color of the center marker.",
+  degreeColor = "The color of the degree readout.",
+  xpColor = "The color of the XP fill.",
+  edgeColor = "The color of the thin lines along the top and bottom edges of the bar.",
+}
 -- Color swatch + label + opacity slider on one row.
 local function ColorRow(parent, text, key, x, y, noAlpha)
   local sw = CreateFrame("Button", nil, parent)
@@ -162,6 +195,7 @@ local function ColorRow(parent, text, key, x, y, noAlpha)
   local tex = sw:CreateTexture(nil, "ARTWORK"); tex:SetAllPoints()
   local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
   fs:SetPoint("LEFT", sw, "RIGHT", 8, 0); fs:SetWidth(108); fs:SetJustifyH("LEFT"); fs:SetText(text)
+  if COLOR_TIPS[key] then HoverTip(sw, text, COLOR_TIPS[key] .. " Click to pick a color; the slider sets its opacity.") end
   sw:SetScript("OnClick", function()
     local c = ns.db[key]
     local prev = { c[1], c[2], c[3] }
@@ -177,6 +211,7 @@ local function ColorRow(parent, text, key, x, y, noAlpha)
   local op = noAlpha and { Dim = function() end } or Slider(parent, nil, x + 144, y - 4, 44, 0, 1, 0.05,
     function() return ns.db[key][4] end,
     function(v) ns.db[key][4] = v; ns.Apply() end, Pct, false)
+  if not noAlpha and COLOR_TIPS[key] then HoverTip(op, text .. " Opacity", "How solid this color is. 100% is fully opaque, 0% hides it.") end
   sw.Dim = function(off)   -- locked while Daylight controls the colors
     sw:SetEnabled(not off); sw:SetAlpha(off and 0.4 or 1)
     local v = off and 0.45 or 1
@@ -190,6 +225,7 @@ end
 -- WoW cannot enumerate font files, so the list is the stock fonts plus whatever other
 -- addons registered with LibSharedMedia. Each entry previews in its own typeface.
 local fontTest
+-- Every font the game offers, for the font picker.
 local function FontList()
   local list, seen = {}, {}
   fontTest = fontTest or UIParent:CreateFontString(nil, "OVERLAY")
@@ -213,9 +249,11 @@ local function FontList()
   return list
 end
 
+-- A font picker with a scrolling list that previews each font.
 local function FontDropdown(parent, x, y, width)
   Label(parent, "Font", x, y, "GameFontNormal")
   local btn = CreateFrame("Button", nil, parent)
+  HoverTip(btn, "Font", "The font for the text on the bar and in the XP tooltip. The list holds the game's own fonts plus any that other addons register with LibSharedMedia.")
   btn:SetSize(width, 24); btn:SetPoint("TOPLEFT", x, y - 20)
   local border = btn:CreateTexture(nil, "BACKGROUND", nil, -1)
   border:SetPoint("TOPLEFT", -1, 1); border:SetPoint("BOTTOMRIGHT", 1, -1); border:SetColorTexture(unpack(BORDER))
@@ -299,6 +337,7 @@ end
 
 -- Modal dialog (used for naming a theme and confirming a delete) ------------------------
 local dialog
+-- The shared popup used for naming and confirming (created on first use).
 local function GetDialog()
   if dialog then return dialog end
   local f = CreateFrame("Frame", "CHUDDialog", UIParent)
@@ -442,9 +481,10 @@ end
 -- Marker menu ----------------------------------------------------------------------------
 -- Opens when the compass is right-clicked: checkboxes for what to point at, plus icon size and range.
 local markerMenu
+-- Builds the right-click marker menu (quick toggles, data sources) and the options panel beside it.
 local function BuildMarkerMenu()
   local f = CreateFrame("Frame", "CHUDMarkerMenu", UIParent)
-  f:SetSize(500, 759); f:SetFrameStrata("FULLSCREEN_DIALOG"); f:SetToplevel(true)
+  f:SetSize(500, 640); f:SetFrameStrata("FULLSCREEN_DIALOG"); f:SetToplevel(true)
   f:EnableMouse(true); f:SetClampedToScreen(true); f:Hide()
   -- Drag the menu by any empty part of it. Once moved it stays where you put it until you reload.
   f:SetMovable(true); f:RegisterForDrag("LeftButton")
@@ -461,6 +501,21 @@ local function BuildMarkerMenu()
   c:SetScript("OnClick", function() f:Hide() end)
   f:SetScript("OnShow", function() c:Show(); Refresh() end)
   f:SetScript("OnHide", function() c:Hide() end)
+  -- Everything below the quick toggles lives on `adv`, shown by the More Options button.
+  local adv = CreateFrame("Frame", nil, f)
+  -- A second panel to the left of the menu, with two columns of its own.
+  adv:SetPoint("TOPRIGHT", f, "TOPLEFT", -6, 0); adv:SetSize(500, 640)
+  adv:EnableMouse(true); adv:RegisterForDrag("LeftButton")   -- empty parts of the panel catch clicks and drag the whole menu
+  adv:SetScript("OnDragStart", function() f:StartMoving() end)
+  adv:SetScript("OnDragStop", function() f:StopMovingOrSizing(); f.userMoved = true end)
+  do
+    local ab = adv:CreateTexture(nil, "BACKGROUND", nil, -1)
+    ab:SetPoint("TOPLEFT", -1, 1); ab:SetPoint("BOTTOMRIGHT", 1, -1); ab:SetColorTexture(unpack(BORDER))
+    local ag = adv:CreateTexture(nil, "BACKGROUND"); ag:SetAllPoints(); ag:SetColorTexture(0.06, 0.06, 0.07, 0.97)
+    local at = adv:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge"); at:SetPoint("TOPLEFT", 14, -12); at:SetText("MORE OPTIONS")
+    local ar = adv:CreateTexture(nil, "ARTWORK")
+    ar:SetPoint("TOPLEFT", 14, -36); ar:SetSize(472, 1); ar:SetColorTexture(unpack(RULE))
+  end
 
   -- Hover explanation for an option: what data it uses and when it shows up.
   -- `extra` (optional) is called when the tooltip opens and may return one more paragraph, shown in orange.
@@ -477,11 +532,55 @@ local function BuildMarkerMenu()
     w:SetScript("OnLeave", function() GameTooltip:Hide() end)
   end
   local function opt(key) return function() return ns.db[key] end, function(v) ns.db[key] = v; ns.MarkersChanged() end end
+  -- The everyday switches sit in a grid at the top: key -> { column, row, short label }.
+  local QUICK = {
+    mk_tracked = { 1, 1, "Tracked Quest" }, mk_objectives = { 1, 2, "Objectives" }, mk_givers = { 1, 3, "Quest Givers" }, mk_corpse = { 1, 4, "Corpse" },
+    mk_rares = { 2, 1, "Rare NPCs" }, mk_treasures = { 2, 2, "Map Treasures" }, mk_party = { 2, 3, "Party" },
+    mk_herbs = { 3, 1, "Herbs" }, mk_ore = { 3, 2, "Ore" }, mk_containers = { 3, 3, "Chests" },
+    mk_gnextOnly = { 3, 5, "Only Next Node" },   -- row 4 of this column is the Next Node check itself
+  }
+  -- When a marker kind has no data behind it, say so: the toggle's label turns orange and its tooltip explains what is missing.
+  local WARN_KIND = { mk_herbs = "herb", mk_ore = "ore", mk_containers = "box", mk_rares = "rare" }
+  local function DataWarn(kind)
+    if kind == "rare" then
+      local inst, readable = ns.RareStatus()
+      if not inst then return "RareScanner was not detected, so only rares the game itself reports nearby will show. Install RareScanner and CHUD reads its spawn points automatically." end
+      if not readable then return "RareScanner was found but its data is not loaded yet. Restart the game once." end
+      return nil
+    end
+    local s = ns.GatherSources()
+    local n = s.own and s.own.counts and s.own.counts[kind] or 0
+    if n > 0 then return nil end
+    if not (s.gl or s.gm2) then
+      return "No gathering data found. Without GatherLite (recommended) or GatherMate2 with GatherMate2_Data, nothing will show here except spots you gather yourself. Install one, then press Refresh Gathering Data in this menu."
+    end
+    if kind == "box" and not s.gl then
+      return "GatherMate2 has no chest data, so nothing will show here except chests you open yourself. Install GatherLite to get chests."
+    end
+    return "CHUD's imported copy has no entries for this yet, so nothing will show except spots you gather yourself. Press Refresh Gathering Data in this menu. GatherLite only supplies the kinds whose tracking is switched on in GatherLite."
+  end
   local function C(text, key, y, tip, extra)
     local g2, s2 = opt(key)
-    local b = Check(f, text, 14, y, g2, s2)
-    b:SetHitRectInsets(0, -190, 0, 0)   -- hovering the label counts too
+    local kind = WARN_KIND[key]
+    if kind then
+      local inner = extra
+      extra = function() return DataWarn(kind) or (inner and inner()) end
+    end
+    local q = QUICK[key]
+    local b
+    if q then
+      b = Check(f, q[3], 14 + (q[1] - 1) * 162, -76 - (q[2] - 1) * 23, g2, s2)
+      b:SetHitRectInsets(0, -110, 0, 0)
+    else
+      b = Check(adv, text, 14, y, g2, s2)
+      b:SetHitRectInsets(0, -190, 0, 0)
+    end
     Tip(b, text, tip, extra)
+    if kind then
+      refreshers[#refreshers + 1] = function()
+        if DataWarn(kind) then b.label:SetTextColor(1, 0.7, 0.3) else b.label:SetTextColor(1, 1, 1) end
+      end
+    end
     return b
   end
 
@@ -502,51 +601,56 @@ local function BuildMarkerMenu()
     if kind == "objective" and p.enableObjectives == false then return "Questie is hiding quest objectives. " .. where .. "Objectives." end
     if kind == "turnin" and p.enableTurnins == false then return "Questie is hiding turn-ins. " .. where .. "Completed Quests." end
   end
-  local function Section(text, y) Header(f, text, 14, y, 224) end
+  local function Section(text, y) Header(adv, text, 14, y, 224) end
 
   Label(f, "C.H.U.D. MARKERS", 14, -12, "GameFontNormalLarge")
   local rule = f:CreateTexture(nil, "ARTWORK")
   rule:SetPoint("TOPLEFT", 14, -36); rule:SetSize(472, 1); rule:SetColorTexture(unpack(RULE))
 
-  Section("Quests", -50)
+  Header(f, "Quick Toggles", 14, -50, 472)
   C("Tracked Quest / Waypoint", "mk_tracked", -86,
     "Points to the quest you are tracking (click a quest in the tracker or quest log to track it) or the map waypoint you are tracking. It shows whenever the game provides a position for it, and sticks to the edge of the bar when it is off to the side, so you know which way to turn. Not available in dungeons.")
   local objB = C("Quest Objectives & Turn-Ins", "mk_objectives", -109,
     "Quests in your log that have a marker on this zone's map: objective areas, and turn-in spots for quests you have completed. The positions come from the same data as the world map's quest markers, so a quest with no map marker will not show. Updates when your quest log changes. Limited by Max Distance.", function() return QuestieHides("objective") or QuestieHides("turnin") end)
   local giverB = C("Quest Givers", "mk_givers", -132,
     "Quests you could pick up in this zone (the same ones the world map marks). Only quest givers the map shows will appear. Limited by Max Distance.", function() return QuestieHides("giver") end)
-  Section("World", -164)
-  C("Rare Elites", "mk_rares", -200,
-    "Rare elites the game is currently reporting, the same ones that appear as map and minimap markers when you are in range. They show only while the game reports them and disappear once killed. Limited by Max Distance.")
-  C("Treasures & Chests", "mk_treasures", -223,
-    "Treasure and chest markers the game is currently reporting nearby. Only objects the game flags this way appear, not every chest in the world. Limited by Max Distance.")
+  C("Rare NPCs", "mk_rares", -200,
+    "Rare elites on the bar. Two sources: the game's own live markers (the same ones as the minimap, shown while the game reports them), and RareScanner's spawn points when RareScanner is installed and enabled. The RareScanner data is read automatically and rares you have killed are hidden until they respawn. Limited by Max Distance.")
+  C("Map Treasures (game-reported)", "mk_treasures", -223,
+    "Treasure markers the game itself is reporting nearby right now, the same kind of live marker as rare elites. They are not saved or imported. Chests from your gathering data are the separate Chests toggle. Limited by Max Distance.")
   C("Corpse", "mk_corpse", -246,
     "Points to your body while you are a ghost, so a corpse run has a heading on the bar. It sticks to the edge of the bar when your body is off to the side, and disappears when you come back to life. Uses the game's own corpse position, so it only shows when the game reports one.")
   C("Party Members", "mk_party", -269,
-    "One icon per party member, chosen by role (tank, healer, damage) when the game reports roles, otherwise by class. Names show under the icon only when Icons Outside Bar is on. Shown at any distance unless Party Respects Max Distance is on. Not used in raids.")
-  local partyLim = C("Party Respects Max Distance", "mk_partyLimit", -292,
+    "One icon per online party member, chosen by role (tank, healer, damage) when the game reports roles, otherwise by class. Offline members are hidden. Names show under the icon only when Icons Outside Bar is on. Shown at any distance unless Party Respects Max Distance is on. Not used in raids.")
+  local partyLim = C("Party Respects Max Distance", "mk_partyLimit", -300,
     "Off (default): party members show at any distance, whenever they are in front of you. On: party members farther away than Max Distance are hidden, like other markers.")
+  local smoothB = C("Smooth Party Movement", "mk_partySmooth", -323,
+    "Party member positions only arrive from the game in jumps, so their icons would hop. This makes each icon glide to its newest position instead. A member who teleports or changes zone is shown at once. Turn it off to show the game's raw positions.")
   refreshers[#refreshers + 1] = function() partyLim.Dim(not ns.db.mk_party) end
-  Section("Gathering (Saved Spots)", -324)
+  -- these two belong with the right column, under the icon style
+  Header(adv, "Party", 262, -432, 224)
+  for i, w in ipairs({ partyLim, smoothB }) do
+    w:ClearAllPoints(); w:SetPoint("TOPLEFT", adv, "TOPLEFT", 264, -468 - (i - 1) * 23)
+  end
   C("Herbs", "mk_herbs", -360,
-    "Spots where YOU have picked herbs before. Each time a Herb Gathering cast succeeds, CHUD saves your position. The game gives addons no way to see live nodes, so this is a memory of past finds: it fills in as you gather, and a spot may be empty if the node has not respawned. Limited by Max Distance.")
+    "Herb node positions from GatherLite or GatherMate2 (kept in CHUD's own copy, see Data Sources) plus spots where you gathered herbs yourself. The nearest 8 show on the bar and grow as you get closer. The game gives addons no way to see live nodes, so a spot can be empty until the node respawns. Limited by Max Distance. With Next Node on, the nearest one is drawn as the large pointer instead.")
   C("Ore", "mk_ore", -383,
-    "Spots where YOU have mined before. Each time a Mining cast succeeds, CHUD saves your position. The game gives addons no way to see live nodes, so this is a memory of past finds: it fills in as you gather, and a spot may be empty if the vein has not respawned. Limited by Max Distance.")
-  C("Containers", "mk_containers", -406,
-    "Spots where you have opened something with the Opening cast (chests and similar objects). CHUD saves your position when the cast succeeds, so this only knows places you have been. Limited by Max Distance.")
-  local note = Label(f, "Spots are saved as you gather them.", 14, -435, "GameFontHighlightSmall")
-  note:SetTextColor(0.65, 0.65, 0.65)
-  Section("Questie", -461)
-  local qs = Label(f, "", 14, -487, "GameFontHighlightSmall")
+    "Ore vein positions from GatherLite or GatherMate2 (kept in CHUD's own copy, see Data Sources) plus spots where you mined yourself. The nearest 8 show on the bar and grow as you get closer. The game gives addons no way to see live veins, so a spot can be empty until the vein respawns. Limited by Max Distance. With Next Node on, the nearest one is drawn as the large pointer instead.")
+  C("Chests / Containers", "mk_containers", -406,
+    "Chest and container positions from GatherLite (GatherMate2 has none) plus spots where you opened something with the Opening cast. The nearest 8 show on the bar and grow as you get closer. A chest you have opened comes back after 20 minutes. Limited by Max Distance. With Next Node on, the nearest one is drawn as the large pointer instead.")
+  C("Only Show Next Node", "mk_gnextOnly", -429,
+    "Hides every herb, ore and chest icon except the large Next Node pointer, for a cleaner bar. It does nothing while Next Node is off. The pointer still moves on to the next closest node once you reach or skip one.")
+  Section("Questie", -50)
+  local qs = Label(adv, "", 14, -76, "GameFontHighlightSmall")
   refreshers[#refreshers + 1] = function()
     if _G.Questie then qs:SetText("Questie detected"); qs:SetTextColor(0.4, 0.9, 0.4)
     else qs:SetText("Questie not detected"); qs:SetTextColor(0.65, 0.65, 0.65) end
   end
-  local useQ = C("Use Questie Markers", "mk_questie", -505,
+  local useQ = C("Use Questie Markers", "mk_questie", -94,
     "When Questie is installed, quest objectives, turn-ins and quest givers come from Questie's map icons instead of the game's. Turned on automatically once Questie is detected. Untick it to go back to the game's own quest markers. Quest Objectives and Quest Givers above still decide which kinds show.")
-  local focusOnly = C("Focused Quest Only", "mk_qFocusOnly", -528,
+  local focusOnly = C("Focused Quest Only", "mk_qFocusOnly", -117,
     "Shows Questie icons only for the quest you have focused (click a quest icon on the bar, or focus it in Questie's tracker or the quest log). Every other quest icon is hidden.")
-  local qr = Slider(f, "Questie Max Distance", 14, -561, 130, 20, 1000, 10,
+  local qr = Slider(adv, "Questie Max Distance", 14, -150, 130, 20, 1000, 10,
     function() return ns.db.mk_qRange end, function(v) ns.db.mk_qRange = v; ns.MarkersChanged() end,
     function(v) return format("%d yd", v) end, true)
   Tip(qr, "Questie Max Distance", "Questie icons farther away than this are hidden. Questie draws one icon per spawn, so only the nearest icon of each quest is shown. The focused quest's marker ignores this and always shows.")
@@ -559,78 +663,215 @@ local function BuildMarkerMenu()
     objB.Dim(QuestieHides("objective") ~= nil and QuestieHides("turnin") ~= nil)
     giverB.Dim(QuestieHides("giver") ~= nil)
   end
-  local orng = Slider(f, "Objective Fade Distance", 14, -609, 130, 20, 500, 10,
+  local orng = Slider(adv, "Objective Fade Distance", 14, -198, 130, 20, 500, 10,
     function() return ns.db.mk_objRange end, function(v) ns.db.mk_objRange = v; ns.MarkersStyle() end,
     function(v) return format("%d yd", v) end, true)
   Tip(orng, "Objective Fade Distance", "Quest objective icons get smaller and more transparent the farther away they are. This is the distance at which they are smallest and faintest. Lower it to fade them sooner; raise it to keep them strong for longer. The focused quest's large marker never fades.")
-  local gr = Slider(f, "Giver Fade Distance", 14, -657, 130, 20, 500, 10,
+  local gr = Slider(adv, "Giver Fade Distance", 14, -246, 130, 20, 500, 10,
     function() return ns.db.mk_giverRange end, function(v) ns.db.mk_giverRange = v; ns.MarkersStyle() end,
     function(v) return format("%d yd", v) end, true)
+  local gs = Slider(adv, "Next Node Size", 14, -474, 130, 1, 2.5, 0.1,
+    function() return ns.db.mk_gnextScale or 1.6 end, function(v) ns.db.mk_gnextScale = v; ns.MarkersStyle() end,
+    function(v) return format("%d%%", v * 100 + 0.5) end, true)
+  Tip(gs, "Next Node Size", "How large the Next Node pointer is compared with other icons on the bar. 100% is the normal icon size.")
   Tip(gr, "Giver Fade Distance", "Quest giver icons are the least urgent, so they get smaller and more transparent the farther away they are. This is the distance at which they are smallest and faintest. Lower it to fade them sooner; raise it to keep them strong for longer.")
-  Tip(Button(f, "Close", 262, -717, 224, function() f:Hide() end), "Close", "Closes this menu. Esc or a click outside it works too.")
-  Tip(Button(f, "Open Settings", 14, -717, 224, function()
+  Tip(Button(f, "Settings", 330, -8, 78, function()
     f:Hide()
     if ns.categoryID then Settings.OpenToCategory(ns.categoryID) end
   end), "Open Settings", "Closes this menu and opens CHUD's main settings page: size, fonts, colors, themes and the experience bar.")
+  Tip(Button(f, "Close", 412, -8, 74, function() f:Hide() end), "Close", "Closes this menu. Esc or a click outside it works too.")
 
   -- Right column: display options and icon style. Style settings are saved with themes.
-  local X = 262
+  local X = 262    -- right column of the options panel (icon style)
+  local DX = 14    -- left column (Questie, then display)
   local function CR(text, key, y, tip)
     local g2, s2 = opt(key)
-    local b = Check(f, text, X, y, g2, s2)
+    local b = Check(adv, text, DX, y, g2, s2)
     b:SetHitRectInsets(0, -190, 0, 0)
     Tip(b, text, tip)
   end
   local function StyleCheck(text, key, y, tip)
-    local b = Check(f, text, X, y, function() return ns.db[key] end,
+    local b = Check(adv, text, X, y, function() return ns.db[key] end,
       function(v) ns.db[key] = v; ns.MarkersStyle() end)
     b:SetHitRectInsets(0, -190, 0, 0)
     Tip(b, text, tip)
   end
-  Header(f, "Display", X, -50, 224)
-  CR("Show Distance", "mk_distance", -86, "Shows the distance in yards under the tracked marker's icon.")
-  local unlock = Check(f, "Unlock (Drag To Move)", X, -109, function() return not ns.db.locked end,
+  Header(adv, "Display", DX, -300, 224)
+  CR("Show Distance", "mk_distance", -336, "Shows the distance in yards under the main icons: the tracked quest or waypoint, your corpse and the Next Node pointer.")
+  local unlock = Check(adv, "Unlock (Drag To Move)", DX, -359, function() return not ns.db.locked end,
     function(v) ns.db.locked = not v; ns.Apply() end)
   unlock:SetHitRectInsets(0, -190, 0, 0)
   Tip(unlock, "Unlock (Drag To Move)", "Lets you drag CHUD to a new position with the left mouse button. The same as /chud unlock and /chud lock. Untick it to lock the position again.")
-  Tip(Button(f, "Center", X, -138, 108, function() ns.CenterHorizontal() end),
+  Tip(Button(adv, "Center", DX, -388, 108, function() ns.CenterHorizontal() end),
     "Center", "Moves the bar to the horizontal middle of the screen and keeps its height.")
-  Tip(Button(f, "Reset Position", X + 116, -138, 108, function() ns.ResetPosition() end),
+  Tip(Button(adv, "Reset Position", DX + 116, -388, 108, function() ns.ResetPosition() end),
     "Reset Position", "Puts the bar back at its default spot. Nothing else is changed.")
-  local rg = Slider(f, "Max Distance", X, -174, 130, 100, 1500, 50,
+  local rg = Slider(adv, "Max Distance", DX, -424, 130, 100, 1500, 50,
     function() return ns.db.mk_range end, function(v) ns.db.mk_range = v; ns.MarkersChanged() end,
     function(v) return format("%d yd", v) end, true)
   Tip(rg, "Max Distance", "Markers farther away than this are hidden. The tracked quest or waypoint marker ignores this and always shows. Questie icons use their own Questie Max Distance.")
 
-  Header(f, "Icon Style", X, -232, 224)
-  local sz = Slider(f, "Icon Size", X, -268, 130, 10, 28, 1,
+  Header(adv, "Icon Style", X, -50, 224)
+  local sz = Slider(adv, "Icon Size", X, -86, 130, 10, 28, 1,
     function() return ns.db.mk_size end, function(v) ns.db.mk_size = v; ns.MarkersStyle() end, Plain, true)
   Tip(sz, "Icon Size", "How big the marker icons are, in pixels. Icon style is saved with themes.")
-  local sw = ColorRow(f, "Icon Color", "mk_color", X, -322)
+  local sw = ColorRow(adv, "Icon Color", "mk_color", X, -140)
   Tip(sw, "Icon Color", "Tints every marker icon. The slider sets opacity. New themes start with their accent color here.")
-  StyleCheck("Original Icon Colors", "mk_native", -352,
+  StyleCheck("Original Icon Colors", "mk_native", -170,
     "Keeps the game's own icon colors (gold quest marks, skulls, etc.) instead of tinting them with Icon Color.")
-  local sa = Slider(f, "Shadow Opacity (0 = Off)", X, -384, 130, 0, 1, 0.05,
+  local sa = Slider(adv, "Shadow Opacity (0 = Off)", X, -202, 130, 0, 1, 0.05,
     function() return ns.db.mk_shadowAlpha end, function(v) ns.db.mk_shadowAlpha = v; ns.MarkersStyle() end, Pct, true, 100)
   Tip(sa, "Shadow Opacity", "How dark the drop shadow under each icon is. 0 turns it off.")
-  local sd = Slider(f, "Shadow Distance", X, -434, 130, 0, 4, 0.5,
+  local sd = Slider(adv, "Shadow Distance", X, -252, 130, 0, 4, 0.5,
     function() return ns.db.mk_shadowDist end, function(v) ns.db.mk_shadowDist = v; ns.MarkersStyle() end, Px, true)
   Tip(sd, "Shadow Distance", "How far the shadow is offset down and to the right of the icon, in pixels.")
-  StyleCheck("Smaller When Far", "mk_depth", -490,
-    "Icons shrink the farther away they are, down to about 60% of Icon Size at the edge of their range. The focused quest's icon is always the largest, and no icon makes the bar taller.")
-  StyleCheck("Icons Outside Bar", "mk_outside", -513,
+  StyleCheck("Smaller When Far", "mk_depth", -308,
+    "Icons shrink the farther away they are, down to 60% of Icon Size at the edge of their range. Herb, ore and chest nodes and quest icons size themselves by their own distance rules instead. The focused quest's icon is always the largest, and no icon makes the bar taller.")
+  StyleCheck("Icons Outside Bar", "mk_outside", -331,
     "Puts the marker icons just outside the bar instead of inside its edge. They go below the bar when it is in the upper half of the screen and above it when it is in the lower half, so they never leave the screen.")
-  local rate = Slider(f, "Icon Update Rate", X, -566, 130, 4, 60, 2,
+  local rate = Slider(adv, "Icon Update Rate", X, -384, 130, 4, 60, 2,
     function() return ns.db.mk_rate end, function(v) ns.db.mk_rate = v end,
     function(v) return format("%d /s", v) end, true)
   Tip(rate, "Icon Update Rate", "How many times per second icons close to you are re-aimed while you move. Higher is smoother, lower uses a little less CPU. Icons farther than about 150 yards, and every icon while you stand still, cost nothing extra. 4 is the old, steppy behavior.")
   if ns.QuestAreaSupported and ns.QuestAreaSupported() then
-    StyleCheck("Glow In Quest Area", "mk_areaGlow", -536,
+    StyleCheck("Glow In Quest Area", "mk_areaGlow", -354,
       "The focused quest's icon pulses with a soft glow while you are inside that quest's area (the blue zone on the map).")
   end
+
+  -- Fading: see Fade.lua. Master Opacity always applies; the rest only matters while Fade Out When Idle is on.
+  Header(adv, "Fading", DX, -526, 224)
+  local fadeChk = Check(adv, "Fade Out When Idle", DX, -562, function() return ns.db.fadeOn == true end,
+    function(v) ns.db.fadeOn = v end)
+  fadeChk:SetHitRectInsets(0, -190, 0, 0)
+  Tip(fadeChk, "Fade Out When Idle", "Off by default. When on, the bar fades to Faded Opacity unless something ticked in Show When is happening. It comes back quickly and fades out slowly, about 1.5 seconds after the last reason to show it ends. The bar stays fully shown while this menu or the settings are open and while the bar is unlocked, so you can set it up.")
+  local FADE_WHEN = {
+    { "fadeCombat", "In combat" }, { "fadeMap", "Map or quest log open" }, { "fadeMouse", "Mouse over the bar or minimap" },
+    { "fadeRun", "Running (keys or mouse held)" }, { "fadeAuto", "Autorun, follow or flight path" }, { "fadeDead", "Dead or a ghost" },
+  }
+  local whenBtn
+  local whenPop = CreateFrame("Frame", nil, adv)
+  whenPop:SetSize(250, #FADE_WHEN * 23 + 12); whenPop:SetPoint("BOTTOMLEFT", adv, "TOPLEFT", DX, -586)   -- opens upward from the button, so it stays inside the screen
+  whenPop:SetFrameStrata("FULLSCREEN_DIALOG"); whenPop:SetFrameLevel(adv:GetFrameLevel() + 20); whenPop:EnableMouse(true); whenPop:Hide()
+  do
+    local pb = whenPop:CreateTexture(nil, "BACKGROUND", nil, -1)
+    pb:SetPoint("TOPLEFT", -1, 1); pb:SetPoint("BOTTOMRIGHT", 1, -1); pb:SetColorTexture(unpack(BORDER))
+    local pg = whenPop:CreateTexture(nil, "BACKGROUND"); pg:SetAllPoints(); pg:SetColorTexture(0.06, 0.06, 0.07, 1)
+  end
+  for i, w in ipairs(FADE_WHEN) do
+    local key = w[1]
+    local cb = Check(whenPop, w[2], 6, -6 - (i - 1) * 23, function() return ns.db[key] == true end, function(v) ns.db[key] = v end)
+    cb:SetHitRectInsets(0, -220, 0, 0)
+  end
+  whenBtn = Button(adv, "", DX, -590, 224, function() whenPop:SetShown(not whenPop:IsShown()) end)
+  Tip(whenBtn, "Show When", "Opens a list of situations that keep the bar fully shown while Fade Out When Idle is on: in combat, the map or quest log open, the mouse over the bar or minimap, running by hand, autorunning (which also covers following another player and flight paths), and dead or a ghost. Running and autorun are separate, so you can keep the bar up for one and fade it for the other. The game has no autorun check, so autorun means moving with no movement key or mouse steering held. Hovering the bar is how you bring it back when it has faded.")
+  adv:HookScript("OnHide", function() whenPop:Hide() end)
+  refreshers[#refreshers + 1] = function()
+    local n = 0
+    for _, w in ipairs(FADE_WHEN) do if ns.db[w[1]] then n = n + 1 end end
+    whenBtn:SetText("Show When: " .. (n > 0 and (n .. " selected") or "None"))
+    whenBtn:SetEnabled(ns.db.fadeOn == true)
+    if not ns.db.fadeOn then whenPop:Hide() end
+  end
+  local masterS = Slider(adv, "Master Opacity", X, -520, 130, 0.2, 1, 0.05,
+    function() return ns.db.masterAlpha or 1 end, function(v) ns.db.masterAlpha = v end, Pct, true, 100, nil, ns.defaults.masterAlpha)
+  Tip(masterS, "Master Opacity", "How solid the whole bar is, markers and XP fill included. It applies all the time, whether or not fading is on. Background Opacity in the settings page only changes the background.")
+  local fadedS = Slider(adv, "Faded Opacity", X, -568, 130, 0, 1, 0.05,
+    function() return ns.db.fadeAlpha or 0 end, function(v) ns.db.fadeAlpha = v end, Pct, true, 100, nil, ns.defaults.fadeAlpha)
+  Tip(fadedS, "Faded Opacity", "How solid the bar is while it is faded out. 0% hides it completely until something in Show When happens, or until you move the mouse over where it sits. It never goes above Master Opacity.")
+  refreshers[#refreshers + 1] = function() fadedS.Dim(not ns.db.fadeOn) end
+
+  -- Data sources: what is installed, in the order CHUD prefers it. CHUD keeps its own copy of the gathering data.
+  Header(f, "Data Sources", 14, -190, 472)
+  local srcRows = {}
+  for i = 1, 3 do srcRows[i] = Label(f, "", 14, -216 - (i - 1) * 16, "GameFontHighlightSmall") end
+  local rsChk = Check(f, "Use", 420, -245, function() return ns.db.mk_rsData ~= false end,
+    function(v) ns.db.mk_rsData = v; ns.MarkersChanged() end)
+  Tip(rsChk, "Use RareScanner Data", "Shows RareScanner's rare NPC spawn points on the bar. Needs Rare NPCs ticked above. Rares you have killed (as RareScanner records them) are hidden until they respawn.")
+  local note = Label(f, "", 14, -268, "GameFontHighlightSmall")
+  note:SetWidth(472); note:SetJustifyH("LEFT"); note:SetWordWrap(true)
+  local own = Label(f, "", 14, -318, "GameFontHighlightSmall")
+  own:SetWidth(238); own:SetJustifyH("LEFT"); own:SetWordWrap(true)
+  local importBtn = Button(f, "Refresh Gathering Data", 262, -314, 224, function()
+    for _, line in ipairs(ns.ImportGatherData()) do print("|cffd9bf4dCHUD:|r " .. line) end
+    Refresh()
+  end)
+  Tip(importBtn, "Refresh Gathering Data", "CHUD never imports by itself: the setup tour (/chud install) or this button does it. This copies every herb, ore and chest node again into CHUD's own saved data, so CHUD keeps working even if those addons are removed later. Nothing in those addons is changed. Use it after updating or switching on more of their tracking. Your own GatherMate2 nodes are included.",
+    function() local s = ns.GatherSources(); if not (s.gm2 or s.gl) then return "Neither GatherLite nor GatherMate2 was detected, so there is nothing to import." end end)
+  StaticPopupDialogs["CHUD_DELETE_GATHER"] = {
+    text = "Delete CHUD's imported herb, ore and chest data? GatherLite and GatherMate2 are not touched, and Refresh Gathering Data brings it back.",
+    button1 = DELETE or "Delete", button2 = CANCEL or "Cancel",
+    OnAccept = function() ns.ClearGatherData(); Refresh() end,
+    OnShow = function(self) self:SetFrameStrata("TOOLTIP"); self:Raise() end,   -- the settings menus sit in FULLSCREEN_DIALOG, above the popup's own strata
+    timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
+  }
+  local deleteBtn = Button(f, "Delete Imported Data", 262, -340, 224, function() StaticPopup_Show("CHUD_DELETE_GATHER") end)
+  Tip(deleteBtn, "Delete Imported Data", "Erases CHUD's own saved copy of the herb, ore and chest nodes, so none of them show on the bar until you import again. Nodes inside GatherLite and GatherMate2 are never touched. Press Refresh Gathering Data to import again.")
+  refreshers[#refreshers + 1] = function() deleteBtn:SetEnabled(ns.db.gdata ~= nil) end
+  local nextChk = Check(f, "Next Node", 14 + 2 * 162, -145, function() return ns.db.mk_gnext ~= false end,
+    function(v) ns.db.mk_gnext = v; ns.MarkersChanged() end)
+  nextChk:SetHitRectInsets(0, -110, 0, 0)
+  Tip(nextChk, "Next Node Pointer", "Draws the nearest herb, ore or chest you have not visited as a large pointer; the other nearby nodes stay on the bar as smaller icons. Once you have been within 12 yards of the pointer for half a second, or the game confirms the object, it counts as visited and the pointer moves on. Visited and skipped nodes come back after 10 minutes (chests 20). Right-click a node to skip it. When the pointer is off the bar it stays pinned to the bar's edge, pointing the way. The Pointer button below limits it to one kind.")
+  local worldChk = Check(f, "Screen Marker", 14, -378, function() return ns.db.mk_world == true end,
+    function(v) ns.db.mk_world = v; ns.MarkersChanged(); if ns.Redraw then ns.Redraw() end end)
+  worldChk:SetHitRectInsets(0, -110, 0, 0)
+  Tip(worldChk, "Screen Marker", "Experimental, off by default. Draws a beam, a ground ring and a pin on your screen where the game puts its waypoint pin for the Next Node. That position comes from the game and can sit off on slopes, so treat it as approximate. It sets the game's map waypoint to the Next Node, which replaces any waypoint you set yourself while this is on, and the game's own pin shows too. It sits behind all other UI.")
+  local hlChk = Check(f, "Highlight Node", 262, -378, function() return ns.db.mk_hl ~= false end,
+    function(v) ns.db.mk_hl = v; if ns.HighlightChanged then ns.HighlightChanged() end end)
+  hlChk:SetHitRectInsets(0, -110, 0, 0)
+  Tip(hlChk, "Highlight Node", "When you get within about 15 yards, lights up the real herb, ore vein or chest with brackets and a ring, using the game's own interact targeting. Once you have been within 12 yards of the Next Node for half a second it counts as visited and the pointer moves on; if you are facing the spot and nothing is there, a Node Not Here effect plays. It needs a few of the game's targeting settings (the same ones Lueur uses): CHUD changes only the ones that differ, and gives them back when you turn this off or log out. If Lueur is also drawing a highlight you will see both; turn one off.")
+  local KIND_CYCLE = { { nil, "Pointer: Any Node" }, { "herb", "Pointer: Herbs Only" }, { "ore", "Pointer: Ore Only" }, { "box", "Pointer: Chests Only" } }
+  local kindBtn = Button(f, "", 14, -350, 238, function()
+    local cur = 1
+    for i, k in ipairs(KIND_CYCLE) do if k[1] == ns.db.mk_gnextKind then cur = i end end
+    ns.db.mk_gnextKind = KIND_CYCLE[cur % #KIND_CYCLE + 1][1]
+    ns.MarkersChanged(); Refresh()
+  end)
+  Tip(kindBtn, "Pointer Kind", "Which nodes the Next Node pointer walks to. Chests Only skips every herb and ore node. Click to switch to the next option.")
+  local hint = Label(f, "Right-click a node on the bar to skip it. Reached and skipped nodes come back by themselves (herbs and ore after 10 minutes, chests after 20).", 14, -406, "GameFontHighlightSmall")
+  hint:SetWidth(472); hint:SetJustifyH("LEFT"); hint:SetWordWrap(true); hint:SetTextColor(0.65, 0.65, 0.65)
+  refreshers[#refreshers + 1] = function()
+    local s = ns.GatherSources()
+    local function Row(i, text, state, good)
+      srcRows[i]:SetText(text .. "  " .. state)
+      if good then srcRows[i]:SetTextColor(0.4, 0.9, 0.4) else srcRows[i]:SetTextColor(0.65, 0.65, 0.65) end
+    end
+    Row(1, "GatherLite (recommended: herbs, ore, chests)", s.gl and "found" or "not found", s.gl)
+    local gmState = (s.gm2 and s.data) and "found" or s.gm2 and "found, no GatherMate2_Data" or s.data and "data found, GatherMate2 missing" or "not found"
+    Row(2, "GatherMate2 + GatherMate2_Data (supported: herbs, ore)", gmState, s.gm2 and s.data)
+    local inst, readable, count = ns.RareStatus()
+    if not inst then Row(3, "RareScanner (rare NPCs, read automatically)", "not found", false)
+    elseif not readable then Row(3, "RareScanner (rare NPCs, read automatically)", "found, data not loaded: restart the game", false)
+    else Row(3, "RareScanner (rare NPCs, read automatically)", format("found, %d rares", count), true) end
+    rsChk:SetShown(inst and readable)
+    local lines = {}
+    if s.gl and (s.gm2 or s.data) then
+      lines[#lines + 1] = "|cffffb347GatherLite and GatherMate2 overlap and can interfere with each other. Consider disabling GatherMate2 in the AddOns list. CHUD keeps its own merged copy, so nothing is lost.|r"
+    elseif not s.gl then
+      lines[#lines + 1] = "|cffffb347GatherLite is the recommended source for herbs, ore and chests. GatherMate2 with GatherMate2_Data also works, but has no chests.|r"
+    else
+      lines[#lines + 1] = "|cff66e666GatherLite covers everything CHUD needs for gathering.|r"
+    end
+    if not inst then lines[#lines + 1] = "|cffa6a6a6Install and enable RareScanner to see rare NPCs on the bar.|r" end
+    note:SetText(table.concat(lines, "\n"))
+    local g = s.own
+    if g then
+      own:SetText(format("CHUD copy: %d herbs, %d ore, %d chests (%s)", g.counts.herb, g.counts.ore, g.counts.box, g.at)); own:SetTextColor(0.4, 0.9, 0.4)
+    else
+      own:SetText("No copy yet. Press Refresh Gathering Data once GatherLite or GatherMate2 is found."); own:SetTextColor(1, 0.7, 0.3)
+    end
+    if s.gm2 or s.gl then importBtn:Enable() else importBtn:Disable() end
+    local label = KIND_CYCLE[1][2]
+    for _, k in ipairs(KIND_CYCLE) do if k[1] == ns.db.mk_gnextKind then label = k[2] end end
+    kindBtn:SetText(label)
+  end
+
+  -- The options panel is always shown beside the menu; keep it on screen too.
+  adv:Show()
+  f:SetClampRectInsets(-506, 0, 0, 0)
   return f
 end
 
+-- Opens or closes the marker menu, placing it next to the bar.
 function ns.ToggleMarkerMenu()
   if not ns.db then return end
   markerMenu = markerMenu or BuildMarkerMenu()
@@ -648,6 +889,7 @@ function ns.ToggleMarkerMenu()
   markerMenu:Show()
 end
 
+-- Builds CHUD's page in the game's settings window.
 function ns.BuildSettings()
   local panel = CreateFrame("Frame")
   panel.name = "CHUD"
@@ -655,7 +897,7 @@ function ns.BuildSettings()
   local function bind(key) return function() return db[key] end, function(v) db[key] = v; ns.Apply() end end
 
   Label(panel, "CHUD Settings", 16, -14, "GameFontNormalHuge")
-  local cmds = Label(panel, "/chud [unlock | lock | center | resetpos | resetcolors | resetbehavior | reset]",
+  local cmds = Label(panel, "/chud [unlock | lock | center | reset | install]",
     16, -44, "GameFontHighlightSmall")
   cmds:SetWidth(380)
 
@@ -687,6 +929,7 @@ function ns.BuildSettings()
     end,
     function(name) ns.ApplyTheme(name) end,
     "CHUDThemePopup")
+  tip(themeBtn, "Theme", "A theme sets colors, layout, fonts and icon style together. Built-in themes come first, then the ones you saved. \"Custom (Unsaved)\" means your settings match no theme; Save keeps them as a new one.")
 
   saveBtn = Button(panel, "Save", 472, -12, 56, function()
     if ns.MatchTheme() then return end    -- identical to an existing theme: nothing to save
@@ -762,21 +1005,23 @@ function ns.BuildSettings()
   Header(panel, "Size & Fade", ax, y, 196)
   local _, popup = FontDropdown(panel, ax, -108, 196)
   y = -164
-  local function S(text, key, a, b, step, fmt, maxFn)
+  local function S(text, key, a, b, step, fmt, maxFn, tipText)
     local g, set = bind(key)
     fmt = fmt or Plain
-    Slider(panel, text, ax, y, 132, a, b, step, g, set, fmt, true, (fmt == Pct) and 100 or 1, maxFn, ns.defaults[key])
+    local sl = Slider(panel, text, ax, y, 132, a, b, step, g, set, fmt, true, (fmt == Pct) and 100 or 1, maxFn, ns.defaults[key])
+    HoverTip(sl, text, tipText, "ANCHOR_RIGHT")
     y = y - 48
   end
   -- Width's upper bound is the real UI width, so it can span the whole top of the screen.
-  S("Width", "width", 200, 1200, 10, Plain, function() return math.max(400, floor(UIParent:GetWidth())) end)
-  S("Height", "height", 20, 80, 1)
-  S("Visible Degrees", "span", 60, 360, 10)
-  S("Font Size", "fontSize", 8, 24, 1)
-  S("Edge Fade Amount", "fadeAmount", 0.05, 1, 0.05, Pct)
-  S("Background Opacity", "bgOpacity", 0, 1, 0.05, Pct)
-  S("XP Fill Strength", "xpFillStrength", 0, 1, 0.05, Pct)
-  S("Text Outline (0 = Off)", "outlineWidth", 0, 2, 1, Plain)
+  S("Width", "width", 200, 1200, 10, Plain, function() return math.max(400, floor(UIParent:GetWidth())) end,
+    "How wide the bar is, in pixels. The largest value is the width of your screen.")
+  S("Height", "height", 20, 80, 1, nil, nil, "How tall the bar is, in pixels. Marker icons are never drawn taller than the bar.")
+  S("Visible Degrees", "span", 60, 360, 10, nil, nil, "How many degrees of the compass fit across the bar. A smaller number zooms in (marks and icons spread out); 360 shows the whole circle at once.")
+  S("Font Size", "fontSize", 8, 24, 1, nil, nil, "The size of the letters and numbers on the bar.")
+  S("Edge Fade Amount", "fadeAmount", 0.05, 1, 0.05, Pct, nil, "How far in from each end the fade reaches, as a share of the bar. Only has an effect while Fade Edges is on.")
+  S("Background Opacity", "bgOpacity", 0, 1, 0.05, Pct, nil, "How solid the bar's background is. 0% hides it completely.")
+  S("XP Fill Strength", "xpFillStrength", 0, 1, 0.05, Pct, nil, "How strong the XP fill's color is. Only has an effect while the XP Bar is on.")
+  S("Text Outline (0 = Off)", "outlineWidth", 0, 2, 1, Plain, nil, "The thickness of the dark outline around text, in pixels. 0 turns the outline off.")
 
   -- Column B: display toggles + position -----------------------------------------
   local ROW = 24   -- vertical step for every checkbox and color row, in all columns, so the spacing matches
@@ -796,6 +1041,7 @@ function ns.BuildSettings()
   C("Flip Ticks / Letters", "flipTicks", "Swaps the sides: letters below and ticks above. Marker icons inside the bar move to the opposite edge too.")
   C("Fade Edges (Bar + BG)", "fadeEdges", "Fades the letters, ticks and icons out toward the left and right ends of the bar. Edge Fade Amount sets how far in the fade reaches.")
   C("Edge Hairlines", "edgeLines", "Draws thin lines along the top and bottom edges of the bar, in the Edge Lines color.")
+  C("Original Icon Colors", "mk_native", "Keeps the game's own icon colors (gold quest marks, skulls and so on) on the marker icons instead of tinting them with the icon color. The same setting is in the marker menu under Icon Style.")
   C("Glitch Effect In Dungeons", "glitchFx", "Plays a short glitch animation when the compass becomes unavailable or comes back. The game withholds your facing inside some instances, so the bar shows a notice there.")
   C("Low-CPU Rendering", "optimize", "Only redraws the bar when your heading or a marker actually changes, instead of every frame. Leave it on unless you see something not updating.")
   -- Turning the right-click menu off needs a confirmation: unlocking the bar and every marker option live there.
@@ -868,9 +1114,9 @@ function ns.BuildSettings()
 
   -- Marker style: two checkboxes that act as a pair (one is always on).
   tip(Check(panel, "Marker: Short", cx, y, function() return db.markerStyle ~= "notch" end,
-    function() db.markerStyle = "short"; ns.Apply() end), "Short Marker", "The center marker is a short vertical line.", "ANCHOR_RIGHT")
+    function() db.markerStyle = "short"; ns.Apply() end), "Short Marker", "The center marker is a short vertical line over the tick area.", "ANCHOR_RIGHT")
   tip(Check(panel, "Marker: Notch", cx + 116, y, function() return db.markerStyle == "notch" end,
-    function() db.markerStyle = "notch"; ns.Apply() end), "Notch Marker", "The center marker is a small notch at the edge of the bar.", "ANCHOR_RIGHT")
+    function() db.markerStyle = "notch"; ns.Apply() end), "Notch Marker", "The center marker is a small triangle at the edge of the bar, with no full-height line.", "ANCHOR_RIGHT")
   y = y - ROW - 4
 
   Header(panel, "XP & Edge Colors", cx, y, 232)
@@ -882,7 +1128,7 @@ function ns.BuildSettings()
     local g, set = bind("scanlines")
     local sc = Check(panel, "Scanlines (Bar + Tooltip)", cx, y, g, set)
     sc:SetHitRectInsets(0, -170, 0, 0)
-    tip(sc, "Scanlines", "Thin dark horizontal lines over the bar background and inside the XP tooltip. They drift slowly, except on the bar while Low-CPU Rendering is on. One switch covers both.", "ANCHOR_RIGHT")
+    tip(sc, "Scanlines", "Thin dark horizontal lines over the bar background and inside the XP tooltip. They drift slowly down. One switch covers both.", "ANCHOR_RIGHT")
     tip(Button(panel, "Tooltip Colors...", cx, y - ROW - 4, 232, function() ns.ToggleTipColors() end),
       "Tooltip Colors", "Opens the XP tooltip color panel. By default the tooltip colors follow the theme; there you can pick your own.", "ANCHOR_RIGHT")
   end
@@ -891,12 +1137,12 @@ function ns.BuildSettings()
   local rule = panel:CreateTexture(nil, "ARTWORK")
   rule:SetPoint("TOPLEFT", 16, -566); rule:SetSize(628, 1); rule:SetColorTexture(unpack(RULE))
   local resetColors = Button(panel, "Reset Colors", 16, -580, 120, function() ns.ResetColors() end)
-  tip(resetColors, "Reset Colors", "Puts every color and the background opacity back to the defaults for your faction. Layout, fonts and markers are untouched. Disabled while Daylight is on.", "ANCHOR_TOP")
+  tip(resetColors, "Reset Colors", "Puts every color, the background opacity, the icon color and the tooltip colors back to the defaults for your faction. Layout, fonts and markers are untouched. Disabled while Daylight is on.", "ANCHOR_TOP")
   refreshers[#refreshers + 1] = function() if ns.DaylightOn() then resetColors:Disable() else resetColors:Enable() end end
   tip(Button(panel, "Reset Layout/Behavior", 142, -580, 160, function() ns.ResetBehavior() end),
-    "Reset Layout/Behavior", "Puts size, fonts, toggles, XP bar options and icon style back to the defaults. Colors and position are untouched.", "ANCHOR_TOP")
+    "Reset Layout/Behavior", "Puts size, fonts, toggles, XP bar options and icon style back to the defaults (this also locks the bar again). Colors and position are untouched.", "ANCHOR_TOP")
   tip(Button(panel, "Reset All Settings", 308, -580, 130, function() ns.Reset() end),
-    "Reset All Settings", "Puts every CHUD setting back to the defaults, including Daylight and marker options. Your saved themes and recorded gathering spots are kept.", "ANCHOR_TOP")
+    "Reset All Settings", "Puts every CHUD setting back to the defaults, including Daylight and marker options. Your saved themes, recorded gathering spots and CHUD's imported gathering data are kept.", "ANCHOR_TOP")
   local xpBtn
   xpBtn = Button(panel, "", 444, -580, 190, function()
     if not ns.BlizzXPFound() then print("|cffd9bf4dCHUD:|r could not find the default XP bar on this client."); return end
@@ -905,7 +1151,7 @@ function ns.BuildSettings()
     Refresh()
   end)
   refreshers[#refreshers + 1] = function() xpBtn:SetText("Default XP Bar: " .. (ns.db.hideBlizzXP and "Hidden" or "Shown")) end
-  tip(xpBtn, "Default XP Bar", "Shows or hides the game's own experience bar at the bottom of the screen. Useful with CHUD's XP fill so the same information is not shown twice.", "ANCHOR_TOP")
+  tip(xpBtn, "Default XP Bar", "Shows or hides the game's own experience bar at the bottom of the screen. CHUD includes its own XP tracker (the fill on the bar, with the numbers when you hover it; see XP Bar + Hover Tooltip), so hiding the default one avoids showing the same thing twice. Keep that option on if you hide this bar.", "ANCHOR_TOP")
 
   panel:SetScript("OnShow", Refresh)
   panel:SetScript("OnHide", function()
@@ -923,6 +1169,7 @@ end
 -- Opened from the main settings. By default the XP tooltip colors follow the theme (with contrast checks);
 -- switching "Match Theme Colors" off lets you pick them. A sample tooltip stays up beside it while it is open.
 local tipColors
+-- Builds the tooltip colors window.
 local function BuildTipColors()
   local f = CreateFrame("Frame", "CHUDTipColors", UIParent)
   f:SetSize(300, 360); f:SetPoint("CENTER", UIParent, "CENTER", 0, -160)
@@ -975,7 +1222,9 @@ local function BuildTipColors()
   f:SetHeight(-y + 44)
   return f
 end
+-- Refreshes the tooltip colors window's preview after a setting changes.
 function ns.TipColorsChanged() if tipColors and tipColors:IsShown() and ns.TipPreview then ns.TipPreview(false) end end
+-- Opens or closes the tooltip colors window.
 function ns.ToggleTipColors()
   tipColors = tipColors or BuildTipColors()
   if tipColors:IsShown() then tipColors:Hide() else tipColors:Show() end

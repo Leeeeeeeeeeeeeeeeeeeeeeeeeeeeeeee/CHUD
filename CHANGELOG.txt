@@ -1,3 +1,37 @@
+CHUD 1.0
+
+Gathering nodes. Herbs, ore and chests now come from GatherLite (recommended, it has all three) or GatherMate2 with GatherMate2_Data (herbs and ore), plus the spots you gather yourself. CHUD imports them into its own saved copy only when you ask (in the setup tour or with the Refresh Gathering Data button), so it keeps working if you remove them later. Delete Imported Data erases the copy. The nearest 8 of each kind show on the bar, bigger as you get closer. If both addons are on, the menu suggests turning GatherMate2 off because they overlap.
+
+Next Node pointer. One large pointer for the nearest herb, ore or chest you have not visited, with a button to limit it to one kind. Being within 12 yards for half a second counts as a visit, even if you leave the radius again. Visited and skipped nodes return after 10 minutes (chests 20). Right-click any node to skip it.
+
+Off-bar pointer. When the Next Node is outside the bar it stays pinned to the edge at no less than 65% opacity instead of fading out. Only Show Next Node hides every other herb, ore and chest icon and is on by default; the setup tour has the checkbox and its demo markers show the difference. Delete Imported Data in the marker menu erases CHUD's own copy of the gathering data.
+
+Highlight Node. Close to the pointer, CHUD draws brackets and a ring on the real herb, vein or chest using the game's own interact targeting. If you are facing the spot and nothing is there, a short "Node Not Here" effect plays and the pointer moves on. It changes a few game targeting settings, only the ones that differ, and gives them back when you turn it off or log out.
+
+Rare NPCs. Rare spawn points are read from RareScanner when it is installed and enabled. CHUD never copies or ships its data, and rares you have killed stay hidden until they respawn.
+
+Party and corpse. Party members get a role or class icon on the bar, glide smoothly between the game's position updates, and are hidden while offline. Your corpse is marked while you are a ghost.
+
+Screen Marker (experimental, off by default). A beam, ring and pin where the game puts its waypoint pin for the Next Node. It follows the game's own pin, so it can sit off on slopes.
+
+Fresh start. Everyone, including anyone upgrading, gets a fresh install the first time 1.0 loads: settings and imported data from earlier versions are cleared once and the setup tour opens. Saved themes and recorded gathering spots are kept.
+
+Setup tour. The first time CHUD loads it opens a short tour (with twelve demo markers placed all the way around the bar while it is open, so there is always something to see; they never appear otherwise): pick a look from a row of theme swatches, choose what the bar points to, see which gathering and rare data addons were found and how the import works (with an Import button), and decide on fading. The bar behind the window updates live. /chud install runs it again.
+
+New themes. Rose Pine, Gruvbox, Dracula, Kanagawa and Everforest, plus an original retro neon one called Synthwave. Horde's XP fill is brighter so it can be seen against its plate.
+
+XP per hour. When you have no rested XP, the XP tooltip's Rested line becomes XP/h, your monster-kill experience rate over the last 10 minutes (quests and exploration are not counted; shown as -- until you have a kill and have played a minute).
+
+Default XP bar. The game's own experience bar is now hidden by default since CHUD has its own XP fill. The last page of the setup tour says so and has a checkbox to bring it back (also the Default XP Bar button in /chud).
+
+Fading. Optional, off by default. Fade Out When Idle makes the bar fade away unless something you tick in Show When is happening: combat, the map or quest log open, the mouse over the bar or minimap, running, autorun (also follow and flight paths), or being dead. Faded Opacity and Master Opacity sliders are in More Options.
+
+Menu. The marker menu has a Quick Toggles grid, a Data Sources section that shows which addons were found, and the remaining options in a panel beside it. Every control now has a tooltip that describes what it really does.
+
+Commands. /chud, /chud unlock, /chud lock, /chud center, /chud reset and /chud install (after a confirmation it resets every setting and the imported data, then runs the tour as on a first install). /chud debug gathers the diagnostic reports into one copyable window.
+
+Fixes and cleanup. A full reset now keeps your imported gathering data and the saved game settings Highlight Node has to give back. Unused code, settings and old comments were removed.
+
 CHUD 0.5.0
 
 Questie support. If Questie is installed, CHUD picks up its quest objectives, turn-ins and quest givers and shows them on the bar with Questie's own icons. It switches on by itself and only reads from Questie, it never changes anything there. If one of Questie's own settings is hiding something, the matching CHUD option greys out and its tooltip tells you what to turn on.

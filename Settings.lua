@@ -154,7 +154,7 @@ local function Px(v) return format("%.1f px", v) end
 local function Pct(v) return format("%d%%", v * 100 + 0.5) end
 
 -- Color swatch + label + opacity slider on one row.
-local function ColorRow(parent, text, key, x, y)
+local function ColorRow(parent, text, key, x, y, noAlpha)
   local sw = CreateFrame("Button", nil, parent)
   sw:SetSize(18, 18); sw:SetPoint("TOPLEFT", x + 2, y - 2)   -- same size and inset as the checkboxes
   local border = sw:CreateTexture(nil, "BACKGROUND"); border:SetPoint("TOPLEFT", -1, 1); border:SetPoint("BOTTOMRIGHT", 1, -1)
@@ -169,12 +169,12 @@ local function ColorRow(parent, text, key, x, y)
     ColorPickerFrame:SetFrameStrata("FULLSCREEN_DIALOG"); ColorPickerFrame:SetToplevel(true); ColorPickerFrame:Raise()
     ColorPickerFrame:SetupColorPickerAndShow({
       r = c[1], g = c[2], b = c[3], hasOpacity = false,
-      swatchFunc = function() c[1], c[2], c[3] = ColorPickerFrame:GetColorRGB(); Refresh(); ns.Apply() end,
-      cancelFunc = function() c[1], c[2], c[3] = prev[1], prev[2], prev[3]; Refresh(); ns.Apply() end,
+      swatchFunc = function() c[1], c[2], c[3] = ColorPickerFrame:GetColorRGB(); Refresh(); ns.Apply(); if ns.TipColorsChanged then ns.TipColorsChanged() end end,
+      cancelFunc = function() c[1], c[2], c[3] = prev[1], prev[2], prev[3]; Refresh(); ns.Apply(); if ns.TipColorsChanged then ns.TipColorsChanged() end end,
     })
   end)
   refreshers[#refreshers + 1] = function() local c = ns.db[key]; tex:SetColorTexture(c[1], c[2], c[3], 1) end
-  local op = Slider(parent, nil, x + 144, y - 4, 44, 0, 1, 0.05,
+  local op = noAlpha and { Dim = function() end } or Slider(parent, nil, x + 144, y - 4, 44, 0, 1, 0.05,
     function() return ns.db[key][4] end,
     function(v) ns.db[key][4] = v; ns.Apply() end, Pct, false)
   sw.Dim = function(off)   -- locked while Daylight controls the colors
@@ -444,8 +444,12 @@ end
 local markerMenu
 local function BuildMarkerMenu()
   local f = CreateFrame("Frame", "CHUDMarkerMenu", UIParent)
-  f:SetSize(500, 690); f:SetFrameStrata("FULLSCREEN_DIALOG"); f:SetToplevel(true)
+  f:SetSize(500, 759); f:SetFrameStrata("FULLSCREEN_DIALOG"); f:SetToplevel(true)
   f:EnableMouse(true); f:SetClampedToScreen(true); f:Hide()
+  -- Drag the menu by any empty part of it. Once moved it stays where you put it until you reload.
+  f:SetMovable(true); f:RegisterForDrag("LeftButton")
+  f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+  f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing(); self.userMoved = true end)
   local b = f:CreateTexture(nil, "BACKGROUND", nil, -1)
   b:SetPoint("TOPLEFT", -1, 1); b:SetPoint("BOTTOMRIGHT", 1, -1); b:SetColorTexture(unpack(BORDER))
   local g = f:CreateTexture(nil, "BACKGROUND"); g:SetAllPoints(); g:SetColorTexture(0.06, 0.06, 0.07, 0.97)
@@ -516,26 +520,33 @@ local function BuildMarkerMenu()
     "Rare elites the game is currently reporting, the same ones that appear as map and minimap markers when you are in range. They show only while the game reports them and disappear once killed. Limited by Max Distance.")
   C("Treasures & Chests", "mk_treasures", -223,
     "Treasure and chest markers the game is currently reporting nearby. Only objects the game flags this way appear, not every chest in the world. Limited by Max Distance.")
-  Section("Gathering (Saved Spots)", -255)
-  C("Herbs", "mk_herbs", -291,
+  C("Corpse", "mk_corpse", -246,
+    "Points to your body while you are a ghost, so a corpse run has a heading on the bar. It sticks to the edge of the bar when your body is off to the side, and disappears when you come back to life. Uses the game's own corpse position, so it only shows when the game reports one.")
+  C("Party Members", "mk_party", -269,
+    "One icon per party member, chosen by role (tank, healer, damage) when the game reports roles, otherwise by class. Names show under the icon only when Icons Outside Bar is on. Shown at any distance unless Party Respects Max Distance is on. Not used in raids.")
+  local partyLim = C("Party Respects Max Distance", "mk_partyLimit", -292,
+    "Off (default): party members show at any distance, whenever they are in front of you. On: party members farther away than Max Distance are hidden, like other markers.")
+  refreshers[#refreshers + 1] = function() partyLim.Dim(not ns.db.mk_party) end
+  Section("Gathering (Saved Spots)", -324)
+  C("Herbs", "mk_herbs", -360,
     "Spots where YOU have picked herbs before. Each time a Herb Gathering cast succeeds, CHUD saves your position. The game gives addons no way to see live nodes, so this is a memory of past finds: it fills in as you gather, and a spot may be empty if the node has not respawned. Limited by Max Distance.")
-  C("Ore", "mk_ore", -314,
+  C("Ore", "mk_ore", -383,
     "Spots where YOU have mined before. Each time a Mining cast succeeds, CHUD saves your position. The game gives addons no way to see live nodes, so this is a memory of past finds: it fills in as you gather, and a spot may be empty if the vein has not respawned. Limited by Max Distance.")
-  C("Containers", "mk_containers", -337,
+  C("Containers", "mk_containers", -406,
     "Spots where you have opened something with the Opening cast (chests and similar objects). CHUD saves your position when the cast succeeds, so this only knows places you have been. Limited by Max Distance.")
-  local note = Label(f, "Spots are saved as you gather them.", 14, -366, "GameFontHighlightSmall")
+  local note = Label(f, "Spots are saved as you gather them.", 14, -435, "GameFontHighlightSmall")
   note:SetTextColor(0.65, 0.65, 0.65)
-  Section("Questie", -392)
-  local qs = Label(f, "", 14, -418, "GameFontHighlightSmall")
+  Section("Questie", -461)
+  local qs = Label(f, "", 14, -487, "GameFontHighlightSmall")
   refreshers[#refreshers + 1] = function()
     if _G.Questie then qs:SetText("Questie detected"); qs:SetTextColor(0.4, 0.9, 0.4)
     else qs:SetText("Questie not detected"); qs:SetTextColor(0.65, 0.65, 0.65) end
   end
-  local useQ = C("Use Questie Markers", "mk_questie", -436,
+  local useQ = C("Use Questie Markers", "mk_questie", -505,
     "When Questie is installed, quest objectives, turn-ins and quest givers come from Questie's map icons instead of the game's. Turned on automatically once Questie is detected. Untick it to go back to the game's own quest markers. Quest Objectives and Quest Givers above still decide which kinds show.")
-  local focusOnly = C("Focused Quest Only", "mk_qFocusOnly", -459,
+  local focusOnly = C("Focused Quest Only", "mk_qFocusOnly", -528,
     "Shows Questie icons only for the quest you have focused (click a quest icon on the bar, or focus it in Questie's tracker or the quest log). Every other quest icon is hidden.")
-  local qr = Slider(f, "Questie Max Distance", 14, -492, 130, 20, 1000, 10,
+  local qr = Slider(f, "Questie Max Distance", 14, -561, 130, 20, 1000, 10,
     function() return ns.db.mk_qRange end, function(v) ns.db.mk_qRange = v; ns.MarkersChanged() end,
     function(v) return format("%d yd", v) end, true)
   Tip(qr, "Questie Max Distance", "Questie icons farther away than this are hidden. Questie draws one icon per spawn, so only the nearest icon of each quest is shown. The focused quest's marker ignores this and always shows.")
@@ -548,15 +559,16 @@ local function BuildMarkerMenu()
     objB.Dim(QuestieHides("objective") ~= nil and QuestieHides("turnin") ~= nil)
     giverB.Dim(QuestieHides("giver") ~= nil)
   end
-  local orng = Slider(f, "Objective Fade Distance", 14, -540, 130, 20, 500, 10,
+  local orng = Slider(f, "Objective Fade Distance", 14, -609, 130, 20, 500, 10,
     function() return ns.db.mk_objRange end, function(v) ns.db.mk_objRange = v; ns.MarkersStyle() end,
     function(v) return format("%d yd", v) end, true)
   Tip(orng, "Objective Fade Distance", "Quest objective icons get smaller and more transparent the farther away they are. This is the distance at which they are smallest and faintest. Lower it to fade them sooner; raise it to keep them strong for longer. The focused quest's large marker never fades.")
-  local gr = Slider(f, "Giver Fade Distance", 14, -588, 130, 20, 500, 10,
+  local gr = Slider(f, "Giver Fade Distance", 14, -657, 130, 20, 500, 10,
     function() return ns.db.mk_giverRange end, function(v) ns.db.mk_giverRange = v; ns.MarkersStyle() end,
     function(v) return format("%d yd", v) end, true)
   Tip(gr, "Giver Fade Distance", "Quest giver icons are the least urgent, so they get smaller and more transparent the farther away they are. This is the distance at which they are smallest and faintest. Lower it to fade them sooner; raise it to keep them strong for longer.")
-  Tip(Button(f, "Open Settings", 14, -648, 224, function()
+  Tip(Button(f, "Close", 262, -717, 224, function() f:Hide() end), "Close", "Closes this menu. Esc or a click outside it works too.")
+  Tip(Button(f, "Open Settings", 14, -717, 224, function()
     f:Hide()
     if ns.categoryID then Settings.OpenToCategory(ns.categoryID) end
   end), "Open Settings", "Closes this menu and opens CHUD's main settings page: size, fonts, colors, themes and the experience bar.")
@@ -623,6 +635,7 @@ function ns.ToggleMarkerMenu()
   if not ns.db then return end
   markerMenu = markerMenu or BuildMarkerMenu()
   if markerMenu:IsShown() then markerMenu:Hide(); return end
+  if markerMenu.userMoved then markerMenu:Show(); return end   -- the player dragged it somewhere: leave it there
   markerMenu:ClearAllPoints()
   -- Leave room under the bar (the icons and their distance text sit there) so size and style changes can be watched
   -- live. When the bar is in the lower half of the screen the menu opens above it instead.
@@ -659,7 +672,7 @@ function ns.BuildSettings()
     end)
     btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
   end
-  themeBtn, themePopup, themeUpdate = ListDropdown(panel, 290, -12, 150,
+  themeBtn, themePopup, themeUpdate = ListDropdown(panel, 316, -12, 124,
     function() if ns.DaylightOn() then return "Daylight (Auto Colors)" end return ns.MatchTheme() or "Custom (Unsaved)" end,
     function()
       local match = ns.MatchTheme()
@@ -675,7 +688,7 @@ function ns.BuildSettings()
     function(name) ns.ApplyTheme(name) end,
     "CHUDThemePopup")
 
-  saveBtn = Button(panel, "Save", 446, -12, 60, function()
+  saveBtn = Button(panel, "Save", 472, -12, 56, function()
     if ns.MatchTheme() then return end    -- identical to an existing theme: nothing to save
     ShowDialog({
       text = "Name your new theme:", edit = true, default = "", yes = "Save",
@@ -695,7 +708,7 @@ function ns.BuildSettings()
   end)
   tip(saveBtn, "Save Theme", "Saves the current look as a new theme. Disabled while your settings already match a theme, and while Daylight is on (its colors change with the clock).")
 
-  delBtn = Button(panel, "Delete", 512, -12, 66, function()
+  delBtn = Button(panel, "Delete", 532, -12, 60, function()
     local name = ns.MatchTheme()
     if not name or ns.IsBuiltin(name) then return end
     ShowDialog({
@@ -704,6 +717,20 @@ function ns.BuildSettings()
     })
   end)
   tip(delBtn, "Delete Theme", "Deletes the selected saved theme. Built-in themes cannot be deleted.")
+
+  -- Previous / Next walk the whole list (built-in, then saved) and wrap around.
+  local function StepTheme(dir)
+    local all = {}
+    for _, n in ipairs(ns.BuiltinNames) do all[#all + 1] = n end
+    for _, n in ipairs(ns.UserThemeNames()) do all[#all + 1] = n end
+    local cur = ns.MatchTheme()
+    local idx = 0
+    for i, n in ipairs(all) do if n == cur then idx = i end end
+    if idx == 0 then idx = (dir > 0) and 0 or 1 end   -- unsaved look: Next starts at the first theme, Previous at the last
+    ns.ApplyTheme(all[(idx - 1 + dir) % #all + 1])
+  end
+  tip(Button(panel, "<", 290, -12, 24, function() StepTheme(-1) end), "Previous Theme", "Applies the theme before this one in the list. Wraps around at the start.")
+  tip(Button(panel, ">", 444, -12, 24, function() StepTheme(1) end), "Next Theme", "Applies the next theme in the list. Wraps around at the end.")
 
   local function themeRefresh()
     themeUpdate()
@@ -749,7 +776,7 @@ function ns.BuildSettings()
   S("Edge Fade Amount", "fadeAmount", 0.05, 1, 0.05, Pct)
   S("Background Opacity", "bgOpacity", 0, 1, 0.05, Pct)
   S("XP Fill Strength", "xpFillStrength", 0, 1, 0.05, Pct)
-  S("Outline Thickness (0 = Off)", "outlineWidth", 0, 2, 0.5, Px)
+  S("Text Outline (0 = Off)", "outlineWidth", 0, 2, 1, Plain)
 
   -- Column B: display toggles + position -----------------------------------------
   local ROW = 24   -- vertical step for every checkbox and color row, in all columns, so the spacing matches
@@ -835,7 +862,6 @@ function ns.BuildSettings()
   for _, r in ipairs({
     { "Text / Numbers", "textColor" }, { "E / S / W", "cardinalColor" }, { "North", "northColor" },
     { "Tick Marks", "tickColor" }, { "Center Marker", "markerColor" }, { "Degree Readout", "degreeColor" },
-    { "Text Outline", "outlineColor" },
   }) do
     CRow(panel, r[1], r[2], cx, y); y = y - ROW
   end
@@ -851,19 +877,28 @@ function ns.BuildSettings()
   y = y - 36
   CRow(panel, "XP Bar", "xpColor", cx, y)
   CRow(panel, "Edge Lines", "edgeColor", cx, y - ROW)
+  y = y - 2 * ROW - 4
+  do
+    local g, set = bind("scanlines")
+    local sc = Check(panel, "Scanlines (Bar + Tooltip)", cx, y, g, set)
+    sc:SetHitRectInsets(0, -170, 0, 0)
+    tip(sc, "Scanlines", "Thin dark horizontal lines over the bar background and inside the XP tooltip. They drift slowly, except on the bar while Low-CPU Rendering is on. One switch covers both.", "ANCHOR_RIGHT")
+    tip(Button(panel, "Tooltip Colors...", cx, y - ROW - 4, 232, function() ns.ToggleTipColors() end),
+      "Tooltip Colors", "Opens the XP tooltip color panel. By default the tooltip colors follow the theme; there you can pick your own.", "ANCHOR_RIGHT")
+  end
 
   -- Bottom bar: resets -------------------------------------------------------------
   local rule = panel:CreateTexture(nil, "ARTWORK")
-  rule:SetPoint("TOPLEFT", 16, -556); rule:SetSize(628, 1); rule:SetColorTexture(unpack(RULE))
-  local resetColors = Button(panel, "Reset Colors", 16, -570, 120, function() ns.ResetColors() end)
+  rule:SetPoint("TOPLEFT", 16, -566); rule:SetSize(628, 1); rule:SetColorTexture(unpack(RULE))
+  local resetColors = Button(panel, "Reset Colors", 16, -580, 120, function() ns.ResetColors() end)
   tip(resetColors, "Reset Colors", "Puts every color and the background opacity back to the defaults for your faction. Layout, fonts and markers are untouched. Disabled while Daylight is on.", "ANCHOR_TOP")
   refreshers[#refreshers + 1] = function() if ns.DaylightOn() then resetColors:Disable() else resetColors:Enable() end end
-  tip(Button(panel, "Reset Layout/Behavior", 142, -570, 160, function() ns.ResetBehavior() end),
+  tip(Button(panel, "Reset Layout/Behavior", 142, -580, 160, function() ns.ResetBehavior() end),
     "Reset Layout/Behavior", "Puts size, fonts, toggles, XP bar options and icon style back to the defaults. Colors and position are untouched.", "ANCHOR_TOP")
-  tip(Button(panel, "Reset All Settings", 308, -570, 130, function() ns.Reset() end),
+  tip(Button(panel, "Reset All Settings", 308, -580, 130, function() ns.Reset() end),
     "Reset All Settings", "Puts every CHUD setting back to the defaults, including Daylight and marker options. Your saved themes and recorded gathering spots are kept.", "ANCHOR_TOP")
   local xpBtn
-  xpBtn = Button(panel, "", 444, -570, 190, function()
+  xpBtn = Button(panel, "", 444, -580, 190, function()
     if not ns.BlizzXPFound() then print("|cffd9bf4dCHUD:|r could not find the default XP bar on this client."); return end
     ns.db.hideBlizzXP = not ns.db.hideBlizzXP
     ns.ApplyBlizzXP()
@@ -881,4 +916,67 @@ function ns.BuildSettings()
   Settings.RegisterAddOnCategory(category)
   ns.categoryID = category:GetID()
   Refresh()
+end
+
+
+-- Tooltip colors panel ------------------------------------------------------------------------------------------
+-- Opened from the main settings. By default the XP tooltip colors follow the theme (with contrast checks);
+-- switching "Match Theme Colors" off lets you pick them. A sample tooltip stays up beside it while it is open.
+local tipColors
+local function BuildTipColors()
+  local f = CreateFrame("Frame", "CHUDTipColors", UIParent)
+  f:SetSize(300, 360); f:SetPoint("CENTER", UIParent, "CENTER", 0, -160)
+  f:SetFrameStrata("FULLSCREEN_DIALOG"); f:SetToplevel(true); f:EnableMouse(true); f:SetClampedToScreen(true)
+  f:SetMovable(true); f:RegisterForDrag("LeftButton")
+  f:SetScript("OnDragStart", function(self) self:StartMoving() end)
+  f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
+  f:Hide()
+  local b = f:CreateTexture(nil, "BACKGROUND", nil, -1)
+  b:SetPoint("TOPLEFT", -1, 1); b:SetPoint("BOTTOMRIGHT", 1, -1); b:SetColorTexture(unpack(BORDER))
+  local g = f:CreateTexture(nil, "BACKGROUND"); g:SetAllPoints(); g:SetColorTexture(0.06, 0.06, 0.07, 0.97)
+  tinsert(UISpecialFrames, "CHUDTipColors")
+  f:SetScript("OnHide", function() if ns.TipHide then ns.TipHide(true) end end)
+  f:SetScript("OnShow", function() Refresh(); if ns.TipPreview then ns.TipPreview(true) end end)
+
+  Label(f, "C.H.U.D. TOOLTIP COLORS", 14, -12, "GameFontNormalLarge")
+  local rule = f:CreateTexture(nil, "ARTWORK")
+  rule:SetPoint("TOPLEFT", 14, -36); rule:SetSize(272, 1); rule:SetColorTexture(unpack(RULE))
+
+  local rows = {}
+  local auto = Check(f, "Match Theme Colors", 14, -50,
+    function() return ns.db.tipAuto ~= false end,
+    function(v)
+      if not v and ns.TipAutoColors then   -- start the custom colors from what the theme gives now
+        local a = ns.TipAutoColors()
+        ns.db.tipGood = { a.good[1], a.good[2], a.good[3], 1 }
+        ns.db.tipRest = { a.rest[1], a.rest[2], a.rest[3], 1 }
+        ns.db.tipBg, ns.db.tipEdge, ns.db.tipAccent, ns.db.tipTitle, ns.db.tipText =
+          { a.bg[1], a.bg[2], a.bg[3], 1 }, { a.edge[1], a.edge[2], a.edge[3], 1 }, { a.accent[1], a.accent[2], a.accent[3], 1 },
+          { a.title[1], a.title[2], a.title[3], 1 }, { a.text[1], a.text[2], a.text[3], 1 }
+      end
+      ns.db.tipAuto = v
+      Refresh(); if ns.TipPreview then ns.TipPreview(false) end
+    end)
+  auto:SetHitRectInsets(0, -170, 0, 0)
+  local note = Label(f, "On: colors follow the theme and are adjusted so the text stays readable.", 40, -74, "GameFontHighlightSmall")
+  note:SetWidth(246); note:SetWordWrap(true); note:SetTextColor(0.65, 0.65, 0.65)
+  local y = -112
+  for _, r in ipairs({ { "Background", "tipBg" }, { "Border Lines", "tipEdge" }, { "Accent / Glow", "tipAccent" },
+    { "Level Title", "tipTitle" }, { "Text", "tipText" },
+    { "Remaining", "tipGood" }, { "Rested", "tipRest" } }) do
+    rows[#rows + 1] = ColorRow(f, r[1], r[2], 14, y, true); y = y - 28
+  end
+  refreshers[#refreshers + 1] = function()
+    local on = ns.db.tipAuto ~= false
+    for _, r in ipairs(rows) do r.Dim(on) end
+  end
+  Button(f, "Replay Sample", 14, y - 8, 130, function() if ns.TipPreview then ns.TipPreview(true) end end)
+  Button(f, "Close", 156, y - 8, 130, function() f:Hide() end)
+  f:SetHeight(-y + 44)
+  return f
+end
+function ns.TipColorsChanged() if tipColors and tipColors:IsShown() and ns.TipPreview then ns.TipPreview(false) end end
+function ns.ToggleTipColors()
+  tipColors = tipColors or BuildTipColors()
+  if tipColors:IsShown() then tipColors:Hide() else tipColors:Show() end
 end

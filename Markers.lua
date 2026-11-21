@@ -40,7 +40,7 @@ local DEDUPE = 15       -- yards: a new gather within this of a recorded spot is
 -- Which setting turns each kind on.
 local OPTION = {
   tracked = "mk_tracked", objective = "mk_objectives", turnin = "mk_objectives", giver = "mk_givers",
-  rare = "mk_rares", treasure = "mk_treasures", herb = "mk_herbs", ore = "mk_ore", box = "mk_containers",
+  rare = "mk_rares", treasure = "mk_treasures", corpse = "mk_corpse", party = "mk_party", herb = "mk_herbs", ore = "mk_ore", box = "mk_containers",
 }
 
 -- Icons: atlases are tried in order, then the fallback file. Vignettes bring their own atlas.
@@ -54,8 +54,11 @@ local ICON = {
   herb      = { file = "Interface\\Icons\\Trade_Herbalism", crop = true },
   ore       = { file = "Interface\\Icons\\Trade_Mining", crop = true },
   box       = { file = "Interface\\Icons\\INV_Box_01", crop = true },
+  corpse    = { atlases = { "poi-graveyard-neutral" }, file = "Interface\\Icons\\Spell_Shadow_AnimateDead", crop = true },
+  party     = { file = "Interface\\Icons\\INV_Misc_QuestionMark", crop = true },   -- real icon is chosen per member (role, else class)
 }
 
+local partyT = {}    -- the party-member targets (their positions are refreshed every Tick, since members move while you stand still)
 local targets = {}   -- every candidate: { kind, mapID, x, y, label, atlas?, primary? }
 local active = {}    -- candidates in range this tick, primary first then nearest first
 local icons = {}     -- frame pool
@@ -322,11 +325,73 @@ local function AddNodes(pm)
   end
 end
 
+-- Corpse and party ----------------------------------------------------------------------------
+-- Corpse: while you are a ghost, C_DeathInfo knows where the body is. It is asked on the current map and its parents,
+-- because the corpse may be on a different map than the one you are on now.
+local function AddCorpse(pm)
+  if not (C_DeathInfo and UnitIsGhost and UnitIsGhost("player")) then return end
+  local list, cur = { pm }, pm
+  for _ = 1, 6 do
+    local info = Try(C_Map.GetMapInfo, cur)
+    if not info or not info.parentMapID or info.parentMapID == 0 then break end
+    cur = info.parentMapID
+    list[#list + 1] = cur
+  end
+  for _, m in ipairs(list) do
+    local x, y = XY(Try(C_DeathInfo.GetCorpseMapPosition, m))
+    if x and (x ~= 0 or y ~= 0) then
+      targets[#targets + 1] = { kind = "corpse", mapID = m, x = x, y = y, label = "Your Corpse", primary = true }
+      return
+    end
+  end
+end
+
+-- Party: one icon per member, chosen by role (tank / healer / damage) when the game reports roles, otherwise by class.
+local ROLE_ATLAS = { TANK = "roleicon-tiny-tank", HEALER = "roleicon-tiny-healer", DAMAGER = "roleicon-tiny-dps" }
+local ROLE_NAME = { TANK = "Tank", HEALER = "Healer", DAMAGER = "Damage" }
+local CLASS_FILE = "Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES"
+local function AddParty(pm)
+  if not GetNumSubgroupMembers or (IsInRaid and IsInRaid()) then return end   -- raids would flood the bar
+  for i = 1, GetNumSubgroupMembers() do
+    local unit = "party" .. i
+    local x, y = XY(Try(C_Map.GetPlayerMapPosition, pm, unit))
+    if x and (x ~= 0 or y ~= 0) then
+      local name = Try(UnitName, unit)
+      if type(name) ~= "string" or (issecretvalue and issecretvalue(name)) then name = nil end
+      local role = Try(UnitGroupRolesAssigned, unit)
+      if type(role) ~= "string" or (issecretvalue and issecretvalue(role)) then role = nil end
+      local _, classFile = Try(UnitClass, unit)
+      if type(classFile) ~= "string" or (issecretvalue and issecretvalue(classFile)) then classFile = nil end
+      local t = { kind = "party", mapID = pm, x = x, y = y, label = name, unit = unit, always = not (ns.db and ns.db.mk_partyLimit) }
+      local roleName = role and ROLE_NAME[role]
+      if roleName then t.atlas = ROLE_ATLAS[role]
+      elseif classFile then t.atlas = "classicon-" .. classFile:lower() end
+      local coords = classFile and _G.CLASS_ICON_TCOORDS and _G.CLASS_ICON_TCOORDS[classFile]
+      if coords then t.fbFile, t.fbCoords = CLASS_FILE, coords end
+      local cname = classFile and (_G.LOCALIZED_CLASS_NAMES_MALE and _G.LOCALIZED_CLASS_NAMES_MALE[classFile]) or nil
+      t.sub = roleName and (cname and (roleName .. " - " .. cname) or roleName) or cname
+      targets[#targets + 1] = t
+      partyT[#partyT + 1] = t
+    end
+  end
+end
+
+-- Members move while you stand still, so their positions are re-read every Tick. True when any of them moved.
+local function RefreshParty()
+  local moved = false
+  for i = 1, #partyT do
+    local t = partyT[i]
+    local x, y = XY(Try(C_Map.GetPlayerMapPosition, t.mapID, t.unit))
+    if x and (x ~= 0 or y ~= 0) and (x ~= t.x or y ~= t.y) then t.x, t.y = x, y; moved = true end
+  end
+  return moved
+end
+
 local Rebuild
 function Rebuild()
   needRebuild, forceRebuild = false, false
   tickDirty = true
-  wipe(targets)
+  wipe(targets); wipe(partyT)
   if not ns.db or not AnyOn() then return end
   local pm = Try(C_Map.GetBestMapForUnit, "player")
   if not Num(pm) then return end
@@ -339,6 +404,8 @@ function Rebuild()
   end
   if On("rare") or On("treasure") then AddVignettes(pm) end
   AddNodes(pm)
+  if On("corpse") then AddCorpse(pm) end
+  if On("party") then AddParty(pm) end
 end
 
 -- Bearing update (every TICK seconds) --------------------------------------------------------
@@ -379,9 +446,10 @@ local function Tick()
   local pm = Try(C_Map.GetBestMapForUnit, "player")
   local px, py = XY(pm and Try(C_Map.GetPlayerMapPosition, pm, "player"))
   if pm ~= tickPm then forceRebuild = true end   -- a new map without a zone event: collect its targets at the next tick
+  local partyMoved = #partyT > 0 and RefreshParty()
   -- Standing still with the same targets: distances and bearings cannot have changed, so keep the last result.
   -- (tickNo and the active list are left alone, so the next real Tick still sees these icons as already drawn.)
-  if not tickDirty and px and pm == tickPm and px == tickPX and py == tickPY then return end
+  if not tickDirty and not partyMoved and px and pm == tickPm and px == tickPX and py == tickPY then return end
   -- Moved only a little since every target was last scanned: which icons are on the bar cannot meaningfully have changed,
   -- so only those icons are re-aimed. Every target is scanned again after RESCAN yards, or when anything else changed.
   local light = false
@@ -431,7 +499,7 @@ local function Tick()
                 local cur = best[t.group]
                 if not cur or dist < cur.dist then best[t.group] = t end
               end
-            elseif t.primary or dist <= limit then
+            elseif t.primary or t.always or dist <= limit then
               local g = t.group
               -- Only a target that is kept needs its fields written; most Questie icons lose to a nearer one of their group.
               if g then
@@ -486,7 +554,7 @@ Tick = ns.Perf("Tick", Tick)
 local KIND_LABEL = {
   tracked = "Tracked Quest", objective = "Quest Objective", turnin = "Quest Turn-In", giver = "Quest Giver",
   rare = "Rare Elite", treasure = "Treasure", herb = "Herb (Saved Spot)", ore = "Ore (Saved Spot)",
-  box = "Container (Saved Spot)",
+  box = "Container (Saved Spot)", corpse = "Corpse", party = "Party Member",
 }
 
 -- Clicking a quest icon focuses that quest by setting the game's super-tracked quest. Questie follows that
@@ -509,6 +577,7 @@ local function ShowTip(ic)
   local kind = KIND_LABEL[t.kind] or ""
   if t.kind == "tracked" and not t.questID then kind = "Waypoint" end
   GameTooltip:AddLine(kind, 0.7, 0.7, 0.7)
+  if t.sub then GameTooltip:AddLine(t.sub, 0.7, 0.7, 0.7) end
   if t.questID then
     if t.kind == "turnin" or Try(C_QuestLog.IsComplete, t.questID) then
       GameTooltip:AddLine("Ready to turn in", 0.3, 1, 0.3)
@@ -586,6 +655,7 @@ local function SetIcon(tex, t)
       if C_Texture.GetAtlasInfo(a) then tex:SetAtlas(a, false); tex:SetTexCoord(0, 1, 0, 1); return end
     end
   end
+  if t.fbFile and t.fbCoords then tex:SetTexture(t.fbFile); tex:SetTexCoord(unpack(t.fbCoords)); return end   -- party member: class icon sheet
   tex:SetTexture(spec.file or "Interface\\Icons\\INV_Misc_QuestionMark")
   if spec.crop then tex:SetTexCoord(0.08, 0.92, 0.08, 0.92) else tex:SetTexCoord(0, 1, 0, 1) end
 end
@@ -660,7 +730,7 @@ function ns.LayoutMarkers(b, ppd, half, fade, fadeZone)
     if t.primary or abs(x) <= half then
     local ic = GetIcon(shown + 1)
     local size, dim = base, 1
-    if t.primary then
+    if t.primary and t.kind ~= "corpse" then   -- the corpse is pinned like a primary but sized like a normal icon, and shrinks with distance
       size = min(base * FOCUS_SCALE, maxSize)
     elseif FADE_RANGE[t.kind] then
       -- Quest givers and objectives shrink and fade the farther away they are; each has its own distance.
@@ -681,12 +751,18 @@ function ns.LayoutMarkers(b, ppd, half, fade, fadeZone)
       y = db.height / 2 - size / 2 - 1
       if db.flipTicks then y = -y end
     end
-    local showDist = t.primary and db.mk_distance
+    local isParty = t.kind == "party"
+    -- A party member shows its name, and only when the icons are outside the bar (inside there is no room for it).
+    local showDist = isParty and (outside and t.label ~= nil) or (t.primary and db.mk_distance)
     local reach = size
     if showDist then
-      -- Measure the distance text first: when pinned to the edge, the text must stay inside the bar too.
-      local d5 = floor(t.dist / 5 + 0.5) * 5
-      if ic.dt ~= t or ic.d5 ~= d5 then ic.dt = t; ic.d5 = d5; ic.dist:SetText(d5 .. " yd") end
+      -- Measure the text first: when pinned to the edge, the text must stay inside the bar too.
+      if isParty then
+        if ic.dt ~= t or ic.d5 ~= -1 then ic.dt = t; ic.d5 = -1; ic.dist:SetText(t.label) end
+      else
+        local d5 = floor(t.dist / 5 + 0.5) * 5
+        if ic.dt ~= t or ic.d5 ~= d5 then ic.dt = t; ic.d5 = d5; ic.dist:SetText(d5 .. " yd") end
+      end
       reach = max(size, ic.dist:GetStringWidth())
     end
     local lim = half - reach / 2 - 2
@@ -813,7 +889,8 @@ end
 local ev = CreateFrame("Frame")
 for _, e in ipairs({ "PLAYER_ENTERING_WORLD", "ZONE_CHANGED", "ZONE_CHANGED_INDOORS", "ZONE_CHANGED_NEW_AREA",
   "QUEST_LOG_UPDATE", "QUEST_POI_UPDATE", "SUPER_TRACKING_CHANGED", "USER_WAYPOINT_UPDATED",
-  "VIGNETTES_UPDATED", "VIGNETTE_MINIMAP_UPDATED" }) do
+  "VIGNETTES_UPDATED", "VIGNETTE_MINIMAP_UPDATED", "PLAYER_DEAD", "PLAYER_ALIVE", "PLAYER_UNGHOST",
+  "GROUP_ROSTER_UPDATE", "PLAYER_ROLES_ASSIGNED", "PARTY_MEMBER_ENABLE", "PARTY_MEMBER_DISABLE" }) do
   pcall(ev.RegisterEvent, ev, e)   -- an event this client does not have is simply skipped
 end
 pcall(ev.RegisterUnitEvent, ev, "UNIT_SPELLCAST_SENT", "player")
@@ -970,4 +1047,128 @@ function ns.MarkerDebug()
     end
   end
   print("  quest area glow:", AreaApi() and "supported" or "not supported by this client")
+end
+
+-- /chud probe: read-only report of which APIs and companion addons this client actually offers -------------
+-- Prints values only; changes nothing. Meant for deciding what CHUD can safely build (corpse, party, gathering data...).
+function ns.Probe()
+  local function show(v)
+    if issecretvalue and issecretvalue(v) then return "<secret>" end
+    if type(v) == "number" then return string.format("%.4f", v) end
+    if type(v) == "table" then   -- position vectors: show the coordinates instead of the table address
+      local ok, x, y = pcall(function()
+        if type(v.GetXY) == "function" then return v:GetXY() end
+        return v.x, v.y
+      end)
+      if ok and type(x) == "number" and type(y) == "number" then return string.format("(%.4f, %.4f)", x, y) end
+    end
+    return tostring(v)
+  end
+  local function call(label, fn, ...)
+    if type(fn) ~= "function" then print("  " .. label .. ": MISSING"); return end
+    local r = { pcall(fn, ...) }
+    if not r[1] then print("  " .. label .. ": ERROR " .. tostring(r[2])); return end
+    local out = {}
+    for i = 2, math.max(#r, 2) do out[#out + 1] = show(r[i]) end
+    print("  " .. label .. ": " .. table.concat(out, ", "))
+    return r[2], r[3]
+  end
+  local pm = Try(C_Map.GetBestMapForUnit, "player")
+  print("CHUD probe | map", tostring(pm), "| ghost", tostring(UnitIsGhost("player")), "| dead", tostring(UnitIsDead("player")),
+    "| instance", tostring(IsInInstance and select(1, IsInInstance())), "| faction", tostring(UnitFactionGroup("player")))
+  print("Secret values: issecretvalue", type(issecretvalue), "| C_Secrets", type(C_Secrets))
+
+  print("-- Corpse / graveyards")
+  local D = C_DeathInfo
+  print("  C_DeathInfo:", D and "present" or "MISSING")
+  if D and pm then
+    call("GetCorpseMapPosition(map)", D.GetCorpseMapPosition, pm)
+    call("GetDeathReleasePosition(map)", D.GetDeathReleasePosition, pm)
+    local g = Try(D.GetGraveyardsForMap, pm)
+    print("  GetGraveyardsForMap(map): " .. (type(g) == "table" and (#g .. " entries") or show(g)))
+    if type(g) == "table" and g[1] then
+      for k, v in pairs(g[1]) do print("    first entry field", k, show(v)) end
+    end
+  end
+  call("HasCorpse?", _G.UnitIsGhost, "player")
+
+  print("-- Party positions")
+  local n = GetNumSubgroupMembers and GetNumSubgroupMembers() or 0
+  print("  party members:", n, "| raid:", tostring(IsInRaid and IsInRaid()))
+  for i = 1, math.min(n, 4) do
+    local u = "party" .. i
+    print("  " .. u, show(UnitName(u)), "connected", show(UnitIsConnected(u)), "visible", show(UnitIsVisible(u)))
+    call("  C_Map.GetPlayerMapPosition(map," .. u .. ")", C_Map.GetPlayerMapPosition, pm, u)
+    call("  UnitPosition(" .. u .. ")", UnitPosition, u)
+    call("  UnitInRange(" .. u .. ")", UnitInRange, u)
+  end
+  if n == 0 then print("  (join a party and run /chud probe again to test the position calls)") end
+  call("player GetPlayerMapPosition", C_Map.GetPlayerMapPosition, pm, "player")
+  call("player UnitPosition", UnitPosition, "player")
+
+  print("-- Vignettes (rare / treasure detection)")
+  local V = C_VignetteInfo
+  print("  C_VignetteInfo:", V and "present" or "MISSING")
+  if V then
+    local guids = Try(V.GetVignettes)
+    print("  GetVignettes: " .. (type(guids) == "table" and (#guids .. " entries") or show(guids)))
+    if type(guids) == "table" then
+      for i = 1, math.min(#guids, 5) do
+        local info = Try(V.GetVignetteInfo, guids[i])
+        print("    ", info and show(info.name) or "?", info and show(info.atlasName) or "?")
+      end
+    end
+  end
+
+  print("-- Nameplates")
+  print("  nameplateMaxDistance", tostring(GetCVar and GetCVar("nameplateMaxDistance")), "| nameplateShowEnemies", tostring(GetCVar and GetCVar("nameplateShowEnemies")),
+    "| nameplateShowAll", tostring(GetCVar and GetCVar("nameplateShowAll")))
+  local plates = Try(C_NamePlate and C_NamePlate.GetNamePlates)
+  if type(plates) == "table" then
+    local c = { total = #plates, players = 0, enemyPlayers = 0, rareElite = 0, targetingMe = 0, secretName = 0 }
+    for _, p in ipairs(plates) do
+      local u = p.namePlateUnitToken or (p.UnitFrame and p.UnitFrame.unit)
+      if u then
+        if UnitIsPlayer(u) then c.players = c.players + 1 end
+        if UnitIsPlayer(u) and UnitIsEnemy("player", u) then c.enemyPlayers = c.enemyPlayers + 1 end
+        local cl = UnitClassification and UnitClassification(u)
+        if cl == "rare" or cl == "rareelite" or cl == "worldboss" then c.rareElite = c.rareElite + 1 end
+        local ok, tgt = pcall(UnitIsUnit, u .. "target", "player")
+        if ok and tgt == true then c.targetingMe = c.targetingMe + 1 end
+        if issecretvalue and issecretvalue(UnitName(u)) then c.secretName = c.secretName + 1 end
+      end
+    end
+    for k, v in pairs(c) do print("  plates." .. k, v) end
+  else
+    print("  C_NamePlate.GetNamePlates: unavailable")
+  end
+
+  print("-- Other addons (read only)")
+  local function loaded(name) return C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded(name) or false end
+  for _, name in ipairs({ "Questie", "GatherLite", "GatherMate2", "GatherMate2_Data", "RareScanner", "HereBeDragons-1.0" }) do
+    print("  " .. name, loaded(name) and "loaded" or "not loaded")
+  end
+  local GL = _G.GatherLite
+  if type(GL) == "table" then
+    local nodes = Try(GL.GetNodes, GL)
+    local total, kinds = 0, {}
+    if type(nodes) == "table" then
+      for k, list in pairs(nodes) do
+        local cnt = 0
+        if type(list) == "table" then for _ in pairs(list) do cnt = cnt + 1 end end
+        kinds[#kinds + 1] = tostring(k) .. "=" .. cnt; total = total + cnt
+      end
+    end
+    print("  GatherLite:GetNodes() ->", type(nodes), "| top-level groups", #kinds > 0 and table.concat(kinds, " ") or "none")
+    call("GatherLite:GetNodeObject(324)", function() local o = GL:GetNodeObject(324); return o and (o.name or o.type) end)
+  end
+  if type(_G.RareScanner) == "table" then
+    local keys = {}
+    for k, v in pairs(_G.RareScanner) do if type(v) == "function" then keys[#keys + 1] = tostring(k) end end
+    table.sort(keys)
+    print("  RareScanner global functions:", #keys > 0 and table.concat(keys, " ", 1, math.min(#keys, 12)) or "none")
+  else
+    print("  RareScanner global: not exposed (data is private to the addon)")
+  end
+  print("CHUD probe done. Copy the output and paste it back.")
 end

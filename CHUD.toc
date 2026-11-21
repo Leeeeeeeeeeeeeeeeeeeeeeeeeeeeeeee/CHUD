@@ -5,9 +5,10 @@
 ## X-License: MIT
 ## IconTexture: Interface\AddOns\CHUD\icon.tga
 ## Version: 0.5.0
-## SavedVariables: CHUDDB
+## SavedVariables: CHUDDB, CHUDLog
 
 CHUD.lua
 Themes.lua
 Markers.lua
+Tooltip.lua
 Settings.lua

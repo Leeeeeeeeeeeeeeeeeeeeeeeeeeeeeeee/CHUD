@@ -23,6 +23,11 @@ ns.defaults = {
   markerStyle = "short",   -- "short" line over the tick area, or "notch" triangle (no full-height line)
   outlineWidth = 0,    -- text outline thickness in pixels (0 = off, the default)
   outlineColor = { 0.00, 0.00, 0.00, 1.00 },   -- outline color; its alpha is multiplied by the text's own alpha
+  scanlines = true,    -- thin dark lines over the bar background and inside the XP tooltip (not part of themes)
+  tipAuto = true,      -- XP tooltip colors follow the theme; off uses the tip* colors below (not part of themes)
+  tipBg = { 0.05, 0.05, 0.07, 1 }, tipEdge = { 1, 0.82, 0, 1 }, tipAccent = { 1, 0.82, 0, 1 },
+  tipTitle = { 1, 0.82, 0, 1 }, tipText = { 0.95, 0.95, 0.95, 1 },
+  tipGood = { 0.45, 0.95, 0.50, 1 }, tipRest = { 0.40, 0.65, 1, 1 },
   showNumbers = false, -- the 30 / 60 / 120 ... degree labels between the letters (off by default)
   -- Experience: a soft wash of the XP color behind the compass.
   xpBar = true,        -- show the XP fill; also enables the hover XP tooltip
@@ -38,6 +43,9 @@ ns.defaults = {
   mk_objectives = true,    -- quest objectives and turn-ins on this map
   mk_givers = false,       -- quests you can pick up
   mk_rares = false, mk_treasures = false,
+  mk_corpse = true,        -- your corpse, while you are a ghost
+  mk_party = true,         -- party members (names show only when icons are outside the bar)
+  mk_partyLimit = false,   -- true = party members obey Max Distance; false = shown at any distance
   mk_herbs = false, mk_ore = false, mk_containers = false,   -- recorded gathering spots
   mk_distance = true,      -- distance under the tracked marker
   mk_size = 16, mk_range = 500,
@@ -48,7 +56,7 @@ ns.defaults = {
   mk_rate = 12,            -- updates per second for close-up icons while you move (higher = smoother, a little more CPU)
   mk_giverRange = 300,     -- yards over which quest giver icons shrink and fade
   mk_objRange = 300,       -- yards over which quest objective icons shrink and fade
-  mk_outside = false,      -- icons sit just outside the bar instead of inside its edge
+  mk_outside = true,       -- icons sit just outside the bar instead of inside its edge
   mk_depth = true,         -- icons get smaller the farther away they are (the focused icon is always the largest)
   mk_color = { 1.00, 0.82, 0.00, 1.00 },        -- icon color (themes set it from their accent)
   mk_shadowAlpha = 0.6, mk_shadowDist = 1.5,   -- icon drop shadow: opacity (0 = off) and distance in pixels
@@ -139,6 +147,28 @@ overlay:SetAllPoints(root)
 overlay:SetFrameLevel(strip:GetFrameLevel() + 5)
 
 local bgLin, bgLout, bgRin, bgRout = NewBG(), NewBG(), NewBG(), NewBG()
+-- Scanlines: one static dark tile layer per background piece, with the same alpha ramp as that piece so the
+-- lines fade out with the background. Static, so they cost nothing per frame.
+local function NewScan()
+  local t = strip:CreateTexture(nil, "BACKGROUND", nil, 1)
+  t:SetTexture("Interface\\AddOns\\CHUD\\media\\scan.tga", "REPEAT", "REPEAT")
+  return t
+end
+local scanPieces = { { NewScan(), bgLin }, { NewScan(), bgRin }, { NewScan(), bgLout }, { NewScan(), bgRout } }
+-- Slow downward drift, same speed as the tooltip's. Runs only while scanlines are on and Low-CPU Rendering is off.
+local scanOff, scanAcc = 0, 0
+local scanDrift = CreateFrame("Frame")
+scanDrift:SetScript("OnUpdate", function(_, dt)
+  local d = db
+  if not d or d.scanlines == false or d.optimize then return end
+  scanAcc = scanAcc + dt
+  if scanAcc < 0.03 then return end
+  scanOff = (scanOff + scanAcc * 8 / 4) % 1
+  scanAcc = 0
+  for _, pc in ipairs(scanPieces) do
+    if pc.w and pc[1]:IsShown() then pc[1]:SetTexCoord(0, pc.w / 16, -scanOff, pc.h / 4 - scanOff) end
+  end
+end)
 
 -- Marker, notch and degree readout: the compass parts on the overlay. Same idea as `content`.
 local contentTop = CreateFrame("Frame", nil, overlay)
@@ -520,7 +550,6 @@ end
 -- Custom text outline. The game's own OUTLINE flag is always black and one fixed thickness, so
 -- instead each text gets 8 copies of itself, offset around it in the outline color, drawn beneath.
 -- Offsets scale with outlineWidth. Outline alpha = outlineColor alpha x the text's own alpha.
-local OUT_DIRS = { {-1,0}, {1,0}, {0,-1}, {0,1}, {-1,-1}, {1,-1}, {-1,1}, {1,1} }
 local function MakeOutline(parent)
   local o = {}
   for i = 1, 8 do
@@ -562,26 +591,19 @@ local function SetFontSafe(fs, size, flags)
   if ok == false then fs:SetFont(STANDARD_TEXT_FONT, size, flags) end
 end
 
--- Styles one text and its outline copies: font, color, alpha, outline offsets.
+-- Styles one text: font, color, alpha and the game's native outline. Native outline and fill are one
+-- glyph, so fading the label fades both together (the old 8-copy outline darkened letters near the
+-- faded edges). Native outlines are always black; width 1 = OUTLINE, 2 = THICKOUTLINE.
+local function OutlineFlag()
+  local w = db.outlineWidth or 0
+  if w <= 0 then return "" end
+  return w > 1 and "THICKOUTLINE" or "OUTLINE"
+end
 local function StyleText(fs, o, size, c)
-  SetFontSafe(fs, size)
+  SetFontSafe(fs, size, OutlineFlag())
   fs:SetTextColor(c[1], c[2], c[3], 1)
   fs:SetAlpha(c[4])           -- SetTextColor's alpha is ignored by FontStrings, so alpha goes here
-  local w, oc = math.min(db.outlineWidth or 0, 2), db.outlineColor   -- 2 px is the supported maximum
-  local on = w > 0 and oc[4] > 0
-  for i = 1, 8 do
-    local f = o[i]
-    if on then
-      SetFontSafe(f, size)
-      f:SetTextColor(oc[1], oc[2], oc[3], 1)
-      f:SetAlpha(oc[4] * c[4])
-      f:ClearAllPoints()
-      f:SetPoint("CENTER", fs, "CENTER", OUT_DIRS[i][1] * w, OUT_DIRS[i][2] * w)
-      f:Show()
-    else
-      f:Hide()
-    end
-  end
+  for i = 1, 8 do o[i]:Hide() end   -- legacy copies stay hidden
 end
 
 -- Disabled state + glitch effect ------------------------------------------------------------
@@ -916,6 +938,29 @@ function ns.Apply()
     grad(bgRout, mid, op, cE, edgeMul)
   end
 
+  -- Scanline pieces copy each background piece's rectangle and alpha ramp.
+  local SA = 0.28
+  local function scanGrad(t, c1, m1, c2, m2)
+    t:SetGradient("HORIZONTAL", CreateColor(0, 0, 0, SA * c1[4] * m1), CreateColor(0, 0, 0, SA * c2[4] * m2))
+  end
+  local gset = {
+    { mid, op, cC, op }, { cC, op, mid, op }, { cE, edgeMul, mid, op }, { mid, op, cE, edgeMul } }
+  for i, pc in ipairs(scanPieces) do
+    local st, bgp = pc[1], pc[2]
+    local on = db.scanlines ~= false and bgp:IsShown()
+    st:SetShown(on)
+    if on then
+      st:ClearAllPoints()
+      st:SetPoint("TOPLEFT", bgp, "TOPLEFT"); st:SetPoint("BOTTOMRIGHT", bgp, "BOTTOMRIGHT")
+      local g = gset[i]
+      scanGrad(st, g[1], g[2], g[3], g[4])
+      local widths = { inner, inner, half - inner, half - inner }
+      local w, h = widths[i], db.height
+      pc.w, pc.h = max(w, 1), h
+      st:SetTexCoord(0, pc.w / 16, -scanOff, h / 4 - scanOff)
+    end
+  end
+
   if ns.MarkersStyle then ns.MarkersStyle() end   -- icon size/colors may have changed (settings or theme)
   root:EnableMouse(true)   -- right-click opens the marker menu; the XP strip has its own hover frame
   unlockTint:SetShown(not db.locked)
@@ -1032,6 +1077,17 @@ end)
 -- XP tooltip -------------------------------------------------------------------
 local hovered = false
 local function ShowTooltip()
+  -- CHUD's own tooltip (see Tooltip.lua); if it is switched off or fails for any reason, the game's tooltip below is used.
+  if db.tipStyle ~= false and ns.TipShow then
+    local d = { drag = not db.locked }
+    if db.xpBar then
+      d.level, d.cur, d.mx, d.isMax = XPInfo()
+      d.rested = GetXPExhaustion and GetXPExhaustion() or nil
+    end
+    local ok, shown = pcall(ns.TipShow, xpHover, d)
+    if ok and shown then return end
+    if ns.TipHide then ns.TipHide() end
+  end
   GameTooltip:SetOwner(xpHover, "ANCHOR_BOTTOM")
   if db.xpBar then
     local level, cur, mx, isMax = XPInfo()
@@ -1051,7 +1107,7 @@ local function ShowTooltip()
   GameTooltip:Show()
 end
 xpHover:SetScript("OnEnter", function() hovered = true; ShowTooltip() end)
-xpHover:SetScript("OnLeave", function() hovered = false; GameTooltip:Hide() end)
+xpHover:SetScript("OnLeave", function() hovered = false; if ns.TipHide then ns.TipHide() end; GameTooltip:Hide() end)
 -- While unlocked, the XP strip drags the whole HUD just like the compass does.
 xpHover:SetScript("OnMouseUp", function(_, button) root:GetScript("OnMouseUp")(root, button) end)   -- right-click still opens the marker menu
 xpHover:SetScript("OnDragStart", function() if db and not db.locked then root:StartMoving() end end)
@@ -1139,8 +1195,9 @@ local function ResetKeys(keys)
   ns.Apply()
   if ns.RefreshSettings then ns.RefreshSettings() end
 end
-function ns.ResetColors() ResetKeys(COLOR_KEYS) end
-function ns.ResetBehavior() ResetKeys(BEHAVIOR_KEYS) end
+local TIP_KEYS = { "tipAuto", "tipBg", "tipEdge", "tipAccent", "tipTitle", "tipText", "tipGood", "tipRest" }
+function ns.ResetColors() ResetKeys(TIP_KEYS); ResetKeys(COLOR_KEYS) end
+function ns.ResetBehavior() ResetKeys({ "scanlines" }); ResetKeys(BEHAVIOR_KEYS) end
 
 -- Position-only resets (leave every other setting alone).
 function ns.CenterHorizontal()
@@ -1154,16 +1211,70 @@ function ns.ResetPosition()
   if ns.RefreshSettings then ns.RefreshSettings() end
 end
 
+-- Diagnostic output capture ------------------------------------------------------------------------------
+-- Test commands (debug, markers, probe, perf) still print to chat, and the same lines are kept in CHUDLog.
+-- WoW cannot write files directly: the saved copy is written to CHUDLog.lua in the SavedVariables folder
+-- (WTF\Account\<account>\SavedVariables) after /reload or logout. "/chud log" shows the same text in a copyable window.
+local LOG_KEEP = 30
+local function Capture(cmd, fn)
+  local lines, old = {}, print
+  print = function(...)
+    local t = {}
+    for i = 1, select("#", ...) do t[i] = tostring((select(i, ...))) end
+    lines[#lines + 1] = (table.concat(t, " "):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""))
+    old(...)
+  end
+  local ok, err = pcall(fn)
+  print = old
+  if not ok then lines[#lines + 1] = "ERROR: " .. tostring(err); old("CHUD: " .. tostring(err)) end
+  local log = _G.CHUDLog
+  if type(log) ~= "table" then log = {}; _G.CHUDLog = log end
+  log[#log + 1] = { when = date("%Y-%m-%d %H:%M:%S"), cmd = "/chud " .. cmd, lines = lines }
+  while #log > LOG_KEEP do table.remove(log, 1) end
+end
+
+local logFrame
+function ns.ShowLog()
+  if not logFrame then
+    local f = CreateFrame("Frame", "CHUDLogFrame", UIParent, "BasicFrameTemplateWithInset")
+    f:SetSize(640, 420); f:SetPoint("CENTER"); f:SetFrameStrata("DIALOG")
+    f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", f.StartMoving); f:SetScript("OnDragStop", f.StopMovingOrSizing)
+    if f.TitleText then f.TitleText:SetText("CHUD log (Ctrl+A, Ctrl+C to copy)") end
+    local sf = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
+    sf:SetPoint("TOPLEFT", 12, -32); sf:SetPoint("BOTTOMRIGHT", -32, 10)
+    local eb = CreateFrame("EditBox", nil, sf)
+    eb:SetMultiLine(true); eb:SetAutoFocus(false); eb:SetFontObject(ChatFontNormal); eb:SetWidth(580)
+    eb:SetScript("OnEscapePressed", function() f:Hide() end)
+    sf:SetScrollChild(eb)
+    f.edit = eb
+    tinsert(UISpecialFrames, "CHUDLogFrame")
+    logFrame = f
+  end
+  local out = {}
+  for _, run in ipairs(_G.CHUDLog or {}) do
+    out[#out + 1] = "=== " .. run.when .. "  " .. run.cmd
+    for _, l in ipairs(run.lines) do out[#out + 1] = l end
+    out[#out + 1] = ""
+  end
+  logFrame.edit:SetText(#out > 0 and table.concat(out, "\n") or "Nothing logged yet. Run /chud probe, /chud markers, /chud debug or /chud perf.")
+  logFrame:Show()
+  logFrame.edit:SetFocus(); logFrame.edit:HighlightText()
+end
+
 SLASH_CHUD1 = "/chud"
 SlashCmdList.CHUD = function(msg)
   msg = strlower(strtrim(msg or ""))
   if msg == "unlock" then db.locked = false; ns.Apply()
   elseif msg == "lock" then db.locked = true; ns.Apply()
-  elseif msg == "debug" then ns.Debug()
-  elseif msg == "markers" then if ns.MarkerDebug then ns.MarkerDebug() end
+  elseif msg == "debug" then Capture(msg, ns.Debug)
+  elseif msg == "markers" then if ns.MarkerDebug then Capture(msg, ns.MarkerDebug) end
+  elseif msg == "probe" then if ns.Probe then Capture(msg, ns.Probe) end
+  elseif msg == "log" then ns.ShowLog()
+  elseif msg == "log clear" then _G.CHUDLog = {}; print("CHUD: log cleared")
   elseif msg == "menu" then if ns.ToggleMarkerMenu then ns.ToggleMarkerMenu() end
   elseif msg == "xpdemo" then ns.XPDemo()
-  elseif msg == "perf" then ns.PerfToggle()
+  elseif msg == "perf" then Capture(msg, ns.PerfToggle)
   elseif msg == "center" then ns.CenterHorizontal()
   elseif msg == "resetpos" then ns.ResetPosition()
   elseif msg == "resetcolors" then ns.ResetColors()

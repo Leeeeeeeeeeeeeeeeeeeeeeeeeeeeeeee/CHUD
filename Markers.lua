@@ -90,11 +90,14 @@ local function AnyOn()
   for _, key in pairs(OPTION) do if db[key] then return true end end
   return false
 end
--- Reads x, y from a map position vector; nil when it is missing or unreadable.
+-- Looks up and calls GetXY inside Try so a failed lookup is protected too.
+local function ReadVector(vec) return vec:GetXY() end
+-- Reads x, y from a map position vector, or returns nil if it is unavailable.
 local function XY(vec)
-  if not vec then return end
-  local ok, x, y = pcall(vec.GetXY, vec)
-  if ok and Num(x) and Num(y) then return x, y end
+  local kind = type(vec)
+  if (kind ~= "table" and kind ~= "userdata") or (issecretvalue and issecretvalue(vec)) then return end
+  local x, y = Try(ReadVector, vec)
+  if Num(x) and Num(y) then return x, y end
 end
 
 -- Questie ------------------------------------------------------------------------------------
@@ -902,8 +905,9 @@ local function TargetXY(t, pm)
   if t.cmap ~= pm or t.cfrom ~= t.mapID then
     t.cmap, t.cfrom, t.cx, t.cy = pm, t.mapID, nil, nil
     local cont, wp = Try(C_Map.GetWorldPosFromMapPos, t.mapID, CreateVector2D(t.x, t.y))
-    if cont and wp then
-      t.cx, t.cy = XY(Try(C_Map.GetMapPosFromWorldPos, cont, wp, pm))
+    if Num(cont) and wp then
+      local _, pos = Try(C_Map.GetMapPosFromWorldPos, cont, wp, pm)
+      t.cx, t.cy = XY(pos)
     end
   end
   return t.cx, t.cy

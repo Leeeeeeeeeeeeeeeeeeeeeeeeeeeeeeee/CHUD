@@ -1,3 +1,7 @@
+CHUD 1.0.1-controller.2
+
+Fixes a Lua error when translating markers from another map and skips unavailable map coordinates.
+
 CHUD 1.0.1-controller.1
 
 Adds a camera-facing gamepad preset in CHUD settings. It uses WoW's native turn and movement settings and lets you restore your previous controls.

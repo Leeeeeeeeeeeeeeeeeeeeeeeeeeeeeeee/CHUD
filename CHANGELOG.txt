@@ -1,3 +1,7 @@
+CHUD 1.0.1-controller.1
+
+Adds a camera-facing gamepad preset in CHUD settings. It uses WoW's native turn and movement settings and lets you restore your previous controls.
+
 CHUD 1.0
 
 Gathering nodes. Herbs, ore and chests now come from GatherLite (recommended, it has all three) or GatherMate2 with GatherMate2_Data (herbs and ore), plus the spots you gather yourself. CHUD imports them into its own saved copy only when you ask (in the setup tour or with the Refresh Gathering Data button), so it keeps working if you remove them later. Delete Imported Data erases the copy. The nearest 8 of each kind show on the bar, bigger as you get closer. If both addons are on, the menu suggests turning GatherMate2 off because they overlap.

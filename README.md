@@ -19,6 +19,12 @@ Download CHUD-1.0.zip.
 - Right-click the bar for the quick menu (markers, unlock, center).
 - `/chud debug` collects diagnostic reports into one copyable window, useful when reporting a problem.
 
+### Gamepad camera
+
+Open `/chud` and choose **Camera-Facing Controls** under **Size & Fade**. The preset uses WoW's native gamepad settings to turn your character with the right stick and keep facing the view while strafing or backpedaling. CHUD follows your character's facing. Mount and swim rules can still change your facing.
+
+Choose **Restore Controller Controls** in the same place to restore the settings CHUD changed. Applying a theme or resetting CHUD keeps the restore values available.
+
 ## Questie
 
 If Questie is installed, CHUD uses its map icons for quest objectives, turn-ins and quest givers, and turns this on

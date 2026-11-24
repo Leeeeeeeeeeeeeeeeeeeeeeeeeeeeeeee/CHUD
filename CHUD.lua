@@ -1249,12 +1249,13 @@ ev:SetScript("OnEvent", function(_, event, name)
   end
   ns.MigrateSavedVariables(db)
   -- Release 1.0 starts everyone from a fresh install: saved settings and imported data from any earlier version are cleared once
-  -- and the setup tour runs. Saved themes, recorded gathering spots and the game settings Highlight Node must give back survive.
+  -- and the setup tour runs. Saved themes, recorded gathering spots and backups of game settings survive.
   if db.setupVersion ~= SETUP_VERSION then
-    local themes, nodes, hlSaved = db.themes, db.nodes, db.hlSaved
+    local themes, nodes, hlSaved, controllerFacingBackup = db.themes, db.nodes, db.hlSaved, db.controllerFacingBackup
     for k in pairs(db) do db[k] = nil end
     for k, v in pairs(ns.defaults) do db[k] = Copy(v) end
     db.themes, db.nodes, db.hlSaved = themes or {}, nodes or {}, hlSaved
+    db.controllerFacingBackup = controllerFacingBackup
     db.schema = SCHEMA
     db.setupVersion = SETUP_VERSION
   end
@@ -1265,14 +1266,15 @@ end)
 
 -- Resets every setting to its default. Saved themes and recorded gathering spots are kept.
 function ns.Reset()
-  -- saved themes, recorded gathering spots, the imported gathering data and the game settings Highlight.lua must give back
-  -- all survive a full reset
+  -- Saved themes, recorded and imported gathering data, and backups of game settings survive a full reset.
   local themes, nodes, gdata, hlSaved, tourDone, setupVersion = db.themes, db.nodes, db.gdata, db.hlSaved, db.tourDone, db.setupVersion
+  local controllerFacingBackup = db.controllerFacingBackup
   for k in pairs(db) do db[k] = nil end
   for k, v in pairs(ns.defaults) do db[k] = Copy(v) end
   db.themes = themes or {}
   db.nodes = nodes or {}
   db.gdata, db.hlSaved, db.tourDone, db.setupVersion = gdata, hlSaved, tourDone, setupVersion
+  db.controllerFacingBackup = controllerFacingBackup
   db.schema = SCHEMA
   ns.Apply()
   if ns.RefreshSettings then ns.RefreshSettings() end

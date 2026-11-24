@@ -21,9 +21,9 @@ Download CHUD-1.0.zip.
 
 ### Gamepad camera
 
-Open `/chud` and choose **Camera-Facing Controls** under **Size & Fade**. The preset uses WoW's native gamepad settings to turn your character with the right stick and keep facing the view while strafing or backpedaling. CHUD follows your character's facing. Mount and swim rules can still change your facing.
+**Gamepad Camera Heading** is enabled by default under `/chud` → **Size & Fade**. CHUD estimates the camera direction from controller input and the character's path. Looking around while moving calibrates right-stick turns at a standstill. WoW's controller settings and bindings stay as set in the game. The estimate can drift during stationary turns and updates again from movement.
 
-Choose **Restore Controller Controls** in the same place to restore the settings CHUD changed. Applying a theme or resetting CHUD keeps the restore values available.
+Players who applied the old controller preset can choose **Restore Controller Controls** in the same place to recover their previous settings.
 
 ## Questie
 

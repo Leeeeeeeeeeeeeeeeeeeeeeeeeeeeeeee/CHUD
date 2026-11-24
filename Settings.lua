@@ -901,18 +901,19 @@ local function ReadControllerCVar(name)
   if ok and (not issecretvalue or not issecretvalue(value)) then return tonumber(value) end
 end
 
--- Applies or restores the native controller settings only on confirmation.
-local function SetControllerFacing(db, restore)
+-- Restores settings saved by the old preset when the player asks to restore them.
+local function RestoreControllerFacing(db)
   if InCombatLockdown() then return "Leave combat before changing controller settings." end
   if not (C_CVar and C_CVar.GetCVar and C_CVar.SetCVar) then
     return "Controller settings are unavailable on this client."
   end
 
-  local saved = db.controllerFacingBackup or {}
+  local saved = db.controllerFacingBackup
+  if not saved then return end
   local current = {}
   for _, setting in ipairs(CONTROLLER_FACING) do
     local name = setting.name
-    if not restore or saved[name] ~= nil then
+    if saved[name] ~= nil then
       current[name] = ReadControllerCVar(name)
       if current[name] == nil then return "A controller setting is unavailable on this client." end
     end
@@ -920,25 +921,20 @@ local function SetControllerFacing(db, restore)
 
   local failed = false
   for _, setting in ipairs(CONTROLLER_FACING) do
-    local name, preset = setting.name, setting.value
-    local before = current[name]
-    local desired = restore and saved[name] or preset
-    if restore and before ~= preset then
-      -- A later change in the game's settings takes precedence over the saved value.
-      saved[name] = nil
-    elseif before ~= desired then
-      pcall(C_CVar.SetCVar, name, tostring(desired))
-      if ReadControllerCVar(name) == desired then
-        if restore then saved[name] = nil else saved[name] = saved[name] or before end
+    local name = setting.name
+    local desired = saved[name]
+    if desired ~= nil then
+      if current[name] == setting.value then
+        pcall(C_CVar.SetCVar, name, tostring(desired))
+        if ReadControllerCVar(name) ~= desired then failed = true else saved[name] = nil end
       else
-        failed = true
+        saved[name] = nil   -- Keep values changed independently in the game's settings.
       end
     end
   end
   db.controllerFacingBackup = next(saved) and saved or nil
   Refresh()
-  if failed then return "Some changes failed. Retry here or restore from CHUD settings." end
-  if not restore and not next(saved) then return "Your controller settings already match this preset." end
+  if failed then return "Some controller settings could not be restored. Try again outside combat." end
 end
 
 -- Builds CHUD's page in the game's settings window.
@@ -1075,21 +1071,24 @@ function ns.BuildSettings()
   S("XP Fill Strength", "xpFillStrength", 0, 1, 0.05, Pct, nil, "How strong the XP fill's color is. Only has an effect while the XP Bar is on.")
   S("Text Outline (0 = Off)", "outlineWidth", 0, 2, 1, Plain, nil, "The thickness of the dark outline around text, in pixels. 0 turns the outline off.")
 
-  local facingBtn = Button(panel, "", ax, y + 14, 196, function()
-    local restore = db.controllerFacingBackup ~= nil
+  local getHeading, setHeading = bind("gamepadHeading")
+  local headingCheck = Check(panel, "Gamepad Camera Heading", ax, y + 14, getHeading, setHeading)
+  tip(headingCheck, "Gamepad Camera Heading",
+    "Estimates which way you are looking from your movement and controller input. Look around while moving to calibrate right-stick turns at a standstill. Works with WoW's default controller settings without changing them.", "ANCHOR_RIGHT")
+  local restoreBtn = Button(panel, "Restore Controller Controls...", ax, y + 14, 196, function()
     ShowDialog({
-      text = restore
-        and "Restore the gamepad settings CHUD changed? Any values you have changed since applying the preset will be kept."
-        or "Apply camera-facing gamepad controls? Your character will turn when you look with the right stick. Sideways and backward movement can become strafing and backpedaling, including in combat.",
-      yes = restore and "Restore" or "Apply",
-      onYes = function() return SetControllerFacing(db, restore) end,
+      text = "Restore the gamepad settings changed by the old CHUD preset? Any values you have changed since applying it will be kept.",
+      yes = "Restore",
+      onYes = function() return RestoreControllerFacing(db) end,
     })
   end)
   refreshers[#refreshers + 1] = function()
-    facingBtn:SetText(db.controllerFacingBackup and "Restore Controller Controls..." or "Camera-Facing Controls...")
+    local hasBackup = db.controllerFacingBackup ~= nil
+    headingCheck:SetShown(not hasBackup)
+    restoreBtn:SetShown(hasBackup)
   end
-  tip(facingBtn, "Camera-Facing Gamepad Controls",
-    "Applies WoW's Always Turn With Camera option and sets both Movement Face Angles to 180. This keeps your character and compass facing the view during ordinary gamepad movement. Mount and swim rules can still turn your character. You can restore your previous controls here.", "ANCHOR_RIGHT")
+  tip(restoreBtn, "Restore Controller Controls",
+    "Restores settings changed by the old CHUD preset and reveals the Gamepad Camera Heading control.", "ANCHOR_RIGHT")
 
   -- Column B: display toggles + position -----------------------------------------
   local ROW = 24   -- vertical step for every checkbox and color row, in all columns, so the spacing matches

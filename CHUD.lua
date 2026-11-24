@@ -72,6 +72,7 @@ ns.defaults = {
   rightClickMenu = true,   -- right-click the bar to open the marker/quick menu (it holds unlock, center and every marker option)
   glitchFx = true,     -- glitch/"broken HUD" effect in dungeons; off = plain fade
   optimize = true,     -- low-CPU rendering (skips redundant updates)
+  gamepadHeading = true,  -- estimate camera heading while using a controller
 }
 
 -- Deep copy of a value (tables are copied recursively), so defaults are never shared with saved settings.
@@ -1116,6 +1117,9 @@ root:SetScript("OnUpdate", ns.Perf("OnUpdate", function(_, elapsed)
   if not usable and badTime > (instMsg and 0.2 or 1) then msg = instMsg or "HUD Unavailable" end
   if msg ~= disabledMsg then SetDisabled(msg) end
   if fx.mode then FXStep(elapsed) end
+  if ns.GamepadHeading then
+    f = ns.GamepadHeading(usable and not disabledMsg and db.gamepadHeading and f or nil, elapsed) or f
+  end
   if disabledMsg or not usable then return end
   if not db.optimize then
     -- Unoptimized path: recompute and re-layout every frame.
@@ -1236,7 +1240,10 @@ ev:SetScript("OnEvent", function(_, event, name)
   if event == "CHAT_MSG_COMBAT_XP_GAIN" then NoteKillXP(name); return end   -- name is the chat message here
   if event ~= "ADDON_LOADED" then
     if db then CheckXPGain(); ns.UpdateXP(); UpdateInstance() end
-    if event == "PLAYER_ENTERING_WORLD" then ns.ApplyBlizzXP() end   -- Blizzard's bar can be created after our load
+    if event == "PLAYER_ENTERING_WORLD" then
+      ns.ApplyBlizzXP()   -- Blizzard's bar can be created after our load
+      if ns.ResetGamepadHeading then ns.ResetGamepadHeading() end
+    end
     if hovered and db then ShowTooltip() end   -- keep an open tooltip current
     return
   end
@@ -1296,7 +1303,7 @@ local TIP_KEYS = { "tipAuto", "tipBg", "tipEdge", "tipAccent", "tipTitle", "tipT
 -- Resets the color settings to their defaults.
 function ns.ResetColors() ResetKeys(TIP_KEYS); ResetKeys(COLOR_KEYS) end
 -- Resets the behavior settings to their defaults.
-function ns.ResetBehavior() ResetKeys({ "scanlines" }); ResetKeys(BEHAVIOR_KEYS) end
+function ns.ResetBehavior() ResetKeys({ "scanlines", "gamepadHeading" }); ResetKeys(BEHAVIOR_KEYS) end
 
 -- Position-only resets (leave every other setting alone).
 function ns.CenterHorizontal()

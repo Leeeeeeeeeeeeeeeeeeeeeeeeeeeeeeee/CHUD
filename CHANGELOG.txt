@@ -1,3 +1,7 @@
+CHUD 1.0.1-controller.3
+
+Estimates gamepad camera heading from movement and stick input with the game's default controller settings. Removes the old preset and retains the option to undo it.
+
 CHUD 1.0.1-controller.2
 
 Fixes a Lua error when translating markers from another map and skips unavailable map coordinates.

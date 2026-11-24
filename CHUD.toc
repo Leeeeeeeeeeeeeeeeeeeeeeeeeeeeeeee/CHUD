@@ -4,10 +4,11 @@
 ## Author: skullfurious
 ## X-License: MIT
 ## IconTexture: Interface\AddOns\CHUD\icon.tga
-## Version: 1.0.1-controller.2
+## Version: 1.0.1-controller.3
 ## SavedVariables: CHUDDB, CHUDLog
 
 ..\RareScanner\Tables\NpcInfoTables.lua
+Controller.lua
 CHUD.lua
 Themes.lua
 Markers.lua
